@@ -311,6 +311,10 @@ func (r *TwoPCRunner) Shutdown(wait bool) error {
 }
 
 func (r *TwoPCRunner) run() {
+	ctx := context.Background()
+	ctx, task := trace.NewTask(ctx, "TwoPCRunner.run")
+	defer task.End()
+	defer trace.StartRegion(ctx, "TwoPCRunner.run.Region").End()
 	for {
 		select {
 		case <-r.shutdownCh:

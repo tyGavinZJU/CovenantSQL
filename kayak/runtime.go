@@ -18,7 +18,6 @@ package kayak
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/CovenantSQL/CovenantSQL/proto"
 )
@@ -34,7 +33,7 @@ type Runtime struct {
 	runnerConfig Config
 	peers        *Peers
 	isLeader     bool
-	logStore     *BoltStore
+	logStore     LogStore
 }
 
 // NewRuntime creates new runtime.
@@ -76,11 +75,11 @@ func NewRuntime(config Config, peers *Peers) (*Runtime, error) {
 // Init defines the common init logic.
 func (r *Runtime) Init() (err error) {
 	// init log store
-	var logStore *BoltStore
 
-	if logStore, err = NewBoltStore(filepath.Join(r.config.RootDir, FileStorePath)); err != nil {
-		return fmt.Errorf("new bolt store: %s", err.Error())
-	}
+	logStore := NewMockInmemStore()
+	//if logStore, err = NewBoltStore(filepath.Join(r.config.RootDir, FileStorePath)); err != nil {
+	//	return fmt.Errorf("new bolt store: %s", err.Error())
+	//}
 
 	// call transport init
 	if err = r.config.Transport.Init(); err != nil {
@@ -89,7 +88,6 @@ func (r *Runtime) Init() (err error) {
 
 	// call runner init
 	if err = r.config.Runner.Init(r.runnerConfig, r.peers, logStore, logStore, r.config.Transport); err != nil {
-		logStore.Close()
 		return fmt.Errorf("%s runner init: %s", r.config.LocalID, err.Error())
 	}
 	r.logStore = logStore
@@ -105,14 +103,6 @@ func (r *Runtime) Shutdown() (err error) {
 
 	if err = r.config.Transport.Shutdown(); err != nil {
 		return
-	}
-
-	if r.logStore != nil {
-		if err = r.logStore.Close(); err != nil {
-			return fmt.Errorf("shutdown bolt store: %s", err.Error())
-		}
-
-		r.logStore = nil
 	}
 
 	return nil

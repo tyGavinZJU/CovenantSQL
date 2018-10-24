@@ -107,7 +107,7 @@ func (c *PersistentCaller) Call(method string, args interface{}, reply interface
 				return
 			}
 		}
-		log.Errorf("call RPC %s failed: %v", method, err)
+		//log.Errorf("call RPC %s failed: %v", method, err)
 	}
 	return
 }
