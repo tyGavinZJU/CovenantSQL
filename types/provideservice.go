@@ -34,6 +34,7 @@ type ProvideServiceHeader struct {
 	TargetUser    proto.AccountAddress
 	GasPrice      uint64
 	TokenType     TokenType
+	ProviderTags  []string // for special usage matching
 	NodeID        proto.NodeID
 	Nonce         interfaces.AccountNonce
 }
