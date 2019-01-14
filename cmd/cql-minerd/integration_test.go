@@ -853,6 +853,7 @@ func benchOutsideMiner(b *testing.B, minerCount uint16, confDir string) {
 		// create
 		meta := client.ResourceMeta{}
 		meta.Node = minerCount
+		meta.UseEventualConsistency = true
 		meta.AdvancePayment = 1000000000
 		// wait for chain service
 		var ctx1, cancel1 = context.WithTimeout(context.Background(), 1*time.Minute)
