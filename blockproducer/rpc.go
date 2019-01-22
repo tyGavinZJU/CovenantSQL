@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+
 	pi "github.com/CovenantSQL/CovenantSQL/blockproducer/interfaces"
 	"github.com/CovenantSQL/CovenantSQL/crypto"
 	"github.com/CovenantSQL/CovenantSQL/crypto/asymmetric"
@@ -30,7 +32,6 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/route"
 	"github.com/CovenantSQL/CovenantSQL/rpc"
 	"github.com/CovenantSQL/CovenantSQL/types"
-	"github.com/pkg/errors"
 )
 
 // ChainRPCService defines a main chain RPC server.
@@ -174,7 +175,7 @@ func WaitDatabaseCreation(
 				if db == nil {
 					return
 				}
-				if _, err = db.ExecContext(ctx, "SHOW TABLES"); err == nil {
+				if _, err = db.QueryContext(ctx, "SHOW TABLES"); err == nil {
 					// err == nil (connect to Miner OK)
 					return
 				}
