@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package main
+package observer
 
 import (
 	"context"
@@ -488,7 +488,7 @@ func TestFullProcess(t *testing.T) {
 		observerCmd, err = utils.RunCommandNB(
 			FJ(baseDir, "./bin/cql-observer.test"),
 			[]string{"-config", FJ(testWorkingDir, "./observation/node_observer/config.yaml"),
-				"-database", string(dbID), "-reset", "oldest",
+				"-log-level", "debug",
 				"-test.coverprofile", FJ(baseDir, "./cmd/cql-observer/observer.cover.out"),
 			},
 			"observer", testWorkingDir, logDir, false,
@@ -500,11 +500,20 @@ func TestFullProcess(t *testing.T) {
 			observerCmd.Cmd.Wait()
 		}()
 
+		err = utils.WaitToConnect(context.Background(), "127.0.0.1", []int{4663}, time.Millisecond*200)
+		So(err, ShouldBeNil)
+
+		time.Sleep(time.Second)
+		// trigger the db subscription
+		res, err := getJSON("v1/head/%v", dbID)
+		So(err, ShouldNotBeNil)
+		log.Debug(err)
+
 		// wait for the observer to collect blocks
 		time.Sleep(conf.GConf.SQLChainPeriod * 5)
 
 		// test get genesis block by height
-		res, err := getJSON("v1/height/%v/0", dbID)
+		res, err = getJSON("v1/height/%v/0", dbID)
 		So(err, ShouldBeNil)
 		So(ensureSuccess(res.Interface("block")), ShouldNotBeNil)
 		So(ensureSuccess(res.Int("block", "height")), ShouldEqual, 0)
@@ -709,7 +718,6 @@ func TestFullProcess(t *testing.T) {
 		observerCmd, err = utils.RunCommandNB(
 			FJ(baseDir, "./bin/cql-observer.test"),
 			[]string{"-config", FJ(testWorkingDir, "./observation/node_observer/config.yaml"),
-				"-database", string(dbID), "-reset", "oldest",
 				"-test.coverprofile", FJ(baseDir, "./cmd/cql-observer/observer.cover.out"),
 			},
 			"observer", testWorkingDir, logDir, false,
@@ -718,6 +726,8 @@ func TestFullProcess(t *testing.T) {
 
 		// call observer subscription status
 		// wait for observer to start
+		err = utils.WaitToConnect(context.Background(), "127.0.0.1", []int{4663}, time.Millisecond*200)
+		So(err, ShouldBeNil)
 		time.Sleep(time.Second * 3)
 
 		res, err = getJSON("v3/subscriptions")

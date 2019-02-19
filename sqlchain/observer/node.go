@@ -14,48 +14,39 @@
  * limitations under the License.
  */
 
-package main
+package observer
 
 import (
+	"fmt"
+	"syscall"
+
 	"github.com/CovenantSQL/CovenantSQL/conf"
 	"github.com/CovenantSQL/CovenantSQL/crypto/kms"
-	"github.com/CovenantSQL/CovenantSQL/proto"
-	"github.com/CovenantSQL/CovenantSQL/rpc"
+	"github.com/CovenantSQL/CovenantSQL/route"
+	"github.com/CovenantSQL/CovenantSQL/utils/log"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
-func registerNode() (err error) {
-	var nodeID proto.NodeID
+func initNode() (err error) {
+	var masterKey []byte
+	if !conf.GConf.IsTestMode {
+		fmt.Print("Type in Master key to continue:")
+		masterKey, err = terminal.ReadPassword(syscall.Stdin)
+		if err != nil {
+			fmt.Printf("Failed to read Master key: %v", err)
+		}
+		fmt.Println("")
+	}
 
-	if nodeID, err = kms.GetLocalNodeID(); err != nil {
+	if err = kms.InitLocalKeyPair(conf.GConf.PrivateKeyFile, masterKey); err != nil {
+		log.WithError(err).Error("init local key pair failed")
 		return
 	}
 
-	var nodeInfo *proto.Node
-	if nodeInfo, err = kms.GetNodeInfo(nodeID); err != nil {
-		return
-	}
+	log.Info("init routes")
 
-	err = rpc.PingBP(nodeInfo, conf.GConf.BP.NodeID)
-
-	return
-}
-
-func startService() (service *Service, err error) {
-	// register observer service to rpc server
-	service, err = NewService()
-	if err != nil {
-		return
-	}
-
-	// start observer service
-	service.start()
-
-	return
-}
-
-func stopService(service *Service) (err error) {
-	// stop subscription
-	service.stop()
+	// init kms routing
+	route.InitKMS(conf.GConf.PubKeyStoreFile)
 
 	return
 }
