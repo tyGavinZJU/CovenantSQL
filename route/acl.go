@@ -118,6 +118,9 @@ const (
 	MCCQueryAccountTokenBalance
 	// MCCQueryTxState is used by client to query transaction state.
 	MCCQueryTxState
+	// MCCQueryAccountsTokenBalances gets all token balances of the given accounts list.
+	// Should only be used for test purpose.
+	MCCQueryAccountsTokenBalances
 
 	// DHTRPCName defines the block producer dh-rpc service name
 	DHTRPCName = "DHT"
@@ -188,6 +191,8 @@ func (s RemoteFunc) String() string {
 		return "MCC.QueryAccountTokenBalance"
 	case MCCQueryTxState:
 		return "MCC.QueryTxState"
+	case MCCQueryAccountsTokenBalances:
+		return "MCC.QueryAccountsTokenBalances"
 	}
 	return "Unknown"
 }

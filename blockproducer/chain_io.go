@@ -118,6 +118,22 @@ func (c *Chain) loadAccountTokenBalance(addr proto.AccountAddress, tt types.Toke
 	return c.immutable.loadAccountTokenBalance(addr, tt)
 }
 
+func (c *Chain) loadAccountsTokenBalances(
+	addrs []proto.AccountAddress) (balances [][types.SupportTokenNumber]uint64, ok bool,
+) {
+	c.RLock()
+	defer c.RUnlock()
+	balances = make([][types.SupportTokenNumber]uint64, len(addrs))
+	for i, v := range addrs {
+		for t := types.TokenType(0); t < types.SupportTokenNumber; t++ {
+			if balances[i][t], ok = c.immutable.loadAccountTokenBalance(v, t); !ok {
+				return
+			}
+		}
+	}
+	return
+}
+
 func (c *Chain) loadSQLChainProfile(databaseID proto.DatabaseID) (profile *types.SQLChainProfile, ok bool) {
 	c.RLock()
 	defer c.RUnlock()

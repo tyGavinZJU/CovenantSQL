@@ -161,6 +161,20 @@ type QueryAccountTokenBalanceResp struct {
 	Balance uint64
 }
 
+// QueryAccountsTokenBalancesReq defines a request of the QueryAccountsTokenBalances RPC method.
+type QueryAccountsTokenBalancesReq struct {
+	proto.Envelope
+	Addrs []proto.AccountAddress
+}
+
+// QueryAccountsTokenBalancesResp defines a request of the QueryAccountsTokenBalances RPC method.
+type QueryAccountsTokenBalancesResp struct {
+	proto.Envelope
+	OK       bool
+	Addrs    []proto.AccountAddress
+	Balances [][SupportTokenNumber]uint64
+}
+
 // QuerySQLChainProfileReq defines a request of the QuerySQLChainProfile RPC method.
 type QuerySQLChainProfileReq struct {
 	proto.Envelope

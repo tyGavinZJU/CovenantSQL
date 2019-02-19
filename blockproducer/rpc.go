@@ -102,6 +102,17 @@ func (s *ChainRPCService) QueryAccountTokenBalance(
 	return
 }
 
+// QueryAccountsTokenBalances is the RPC method to query token balances of a list of accounts.
+func (s *ChainRPCService) QueryAccountsTokenBalances(
+	req *types.QueryAccountsTokenBalancesReq, resp *types.QueryAccountsTokenBalancesResp,
+) (
+	err error,
+) {
+	resp.Addrs = req.Addrs
+	resp.Balances, resp.OK = s.chain.loadAccountsTokenBalances(req.Addrs)
+	return
+}
+
 // QuerySQLChainProfile is the RPC method to query SQLChainProfile.
 func (s *ChainRPCService) QuerySQLChainProfile(req *types.QuerySQLChainProfileReq,
 	resp *types.QuerySQLChainProfileResp) (err error) {

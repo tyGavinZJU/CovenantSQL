@@ -318,6 +318,34 @@ func GetTokenBalance(tt types.TokenType) (balance uint64, err error) {
 	return
 }
 
+// GetAccountsTokenBalances gets all token balances of the given accounts list. This method should
+// only be used for test purpose.
+func GetAccountsTokenBalances(
+	accounts []proto.AccountAddress) (balances [][types.SupportTokenNumber]uint64, err error,
+) {
+	if atomic.LoadUint32(&driverInitialized) == 0 {
+		err = ErrNotInitialized
+		return
+	}
+
+	var (
+		req  = &types.QueryAccountsTokenBalancesReq{}
+		resp = &types.QueryAccountsTokenBalancesResp{}
+	)
+
+	if err = requestBP(route.MCCQueryAccountTokenBalance, req, resp); err != nil {
+		return
+	}
+
+	if !resp.OK {
+		err = ErrNoSuchTokenBalance
+		return
+	}
+
+	balances = resp.Balances
+	return
+}
+
 // UpdatePermission sends UpdatePermission transaction to chain.
 func UpdatePermission(targetUser proto.AccountAddress,
 	targetChain proto.AccountAddress, perm *types.UserPermission) (txHash hash.Hash, err error) {
