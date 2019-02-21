@@ -20,7 +20,6 @@ import (
 	"context"
 	"io/ioutil"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -515,52 +514,6 @@ func TestDatabaseRecycle(t *testing.T) {
 		So(err, ShouldBeNil)
 		_, err = os.Stat(rootDir)
 		So(err, ShouldNotBeNil)
-	})
-}
-
-func TestDatabase_EncodePayload(t *testing.T) {
-	Convey("encode payload cache", t, func() {
-		db := &Database{}
-		req := &types.Request{
-			Envelope: proto.Envelope{
-				Version: "",
-				TTL:     0,
-				Expire:  0,
-				NodeID: &proto.RawNodeID{
-					Hash: hash.Hash{},
-				},
-			},
-			Header: types.SignedRequestHeader{
-				RequestHeader: types.RequestHeader{
-					QueryType:    1,
-					NodeID:       "0000000000000000000000000000000000000000000000000000000000000001",
-					DatabaseID:   "1",
-					ConnectionID: 1,
-					SeqNo:        1,
-					Timestamp:    time.Now().UTC(),
-					BatchCount:   1,
-					QueriesHash:  hash.Hash{},
-				},
-			},
-			Payload: types.RequestPayload{
-				Queries: []types.Query{
-					{
-						Pattern: "xxx",
-						Args:    nil,
-					},
-				},
-			},
-		}
-		encoded, err := db.EncodePayload(req)
-		So(err, ShouldBeNil)
-		req2, err := db.DecodePayload(encoded)
-		So(err, ShouldBeNil)
-		So(req.Header, ShouldResemble, req2.(*types.Request).Header)
-		So(reflect.DeepEqual(req.Header, req2.(*types.Request).Header), ShouldBeTrue)
-		So(reflect.DeepEqual(req.Payload, req2.(*types.Request).Payload), ShouldBeTrue)
-		encoded2, err := db.EncodePayload(req)
-		So(err, ShouldBeNil)
-		So(encoded2, ShouldResemble, encoded)
 	})
 }
 

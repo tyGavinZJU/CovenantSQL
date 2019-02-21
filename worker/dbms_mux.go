@@ -75,7 +75,7 @@ func (s *DBKayakMuxService) Fetch(req *kt.FetchRequest, resp *kt.FetchResponse) 
 	id := proto.DatabaseID(req.Instance)
 
 	if v, ok := s.serviceMap.Load(id); ok {
-		var l *kt.Log
+		var l kt.Log
 		if l, err = v.(*kayak.Runtime).Fetch(req.GetContext(), req.Index); err != nil {
 			resp.Log = l
 			resp.Instance = req.Instance

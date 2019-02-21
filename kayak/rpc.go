@@ -39,7 +39,7 @@ func (r *Runtime) errorSummary(errs map[proto.NodeID]error) error {
 }
 
 /// rpc related
-func (r *Runtime) applyRPC(l *kt.Log, minCount int) (tracker *rpcTracker) {
+func (r *Runtime) applyRPC(l kt.Log, minCount int) (tracker *rpcTracker) {
 	req := &kt.ApplyRequest{
 		Instance: r.instanceID,
 		Log:      l,

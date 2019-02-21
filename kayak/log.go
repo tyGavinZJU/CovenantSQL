@@ -19,39 +19,21 @@ package kayak
 import (
 	"context"
 	"io"
-	"log"
 
 	kt "github.com/CovenantSQL/CovenantSQL/kayak/types"
 	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 	"github.com/pkg/errors"
 )
 
-func (r *Runtime) newLog(ctx context.Context, logType kt.LogType, data []byte) (l *kt.Log, err error) {
-	defer trace.StartRegion(ctx, "newWAL").End()
-
-	// allocate index
+func (r *Runtime) allocateNextIndex() (logIndex uint64) {
 	r.nextIndexLock.Lock()
-	i := r.nextIndex
+	defer r.nextIndexLock.Unlock()
+	logIndex = r.nextIndex
 	r.nextIndex++
-	r.nextIndexLock.Unlock()
-	l = &kt.Log{
-		LogHeader: kt.LogHeader{
-			Index:    i,
-			Type:     logType,
-			Producer: r.nodeID,
-		},
-		Data: data,
-	}
-
-	// error write will be a fatal error, cause to node to fail fast
-	if err = r.wal.Write(l); err != nil {
-		log.Fatalf("WRITE LOG FAILED: %v", err)
-	}
-
 	return
 }
 
-func (r *Runtime) writeWAL(ctx context.Context, l *kt.Log) (err error) {
+func (r *Runtime) writeWAL(ctx context.Context, l kt.Log) (err error) {
 	defer trace.StartRegion(ctx, "writeWal").End()
 
 	if err = r.wal.Write(l); err != nil {
@@ -63,7 +45,7 @@ func (r *Runtime) writeWAL(ctx context.Context, l *kt.Log) (err error) {
 
 func (r *Runtime) readLogs() (err error) {
 	// load logs, only called during init
-	var l *kt.Log
+	var l kt.Log
 
 	for {
 		if l, err = r.wal.Read(); err != nil && err != io.EOF {
@@ -74,14 +56,14 @@ func (r *Runtime) readLogs() (err error) {
 			break
 		}
 
-		switch l.Type {
-		case kt.LogPrepare:
+		switch l.GetType() {
+		case kt.LogTypePrepare:
 			// record in pending prepares
-			r.pendingPrepares[l.Index] = true
-		case kt.LogCommit:
+			r.pendingPrepares[l.GetIndex()] = true
+		case kt.LogTypeCommit:
 			// record last commit
 			var lastCommit uint64
-			var prepareLog *kt.Log
+			var prepareLog *kt.LogPrepare
 			if lastCommit, prepareLog, err = r.getPrepareLog(context.Background(), l); err != nil {
 				err = errors.Wrap(err, "previous prepare does not exists, node need full recovery")
 				return
@@ -91,32 +73,32 @@ func (r *Runtime) readLogs() (err error) {
 					"last commit record in wal mismatched (expected: %v, actual: %v)", r.lastCommit, lastCommit)
 				return
 			}
-			if !r.pendingPrepares[prepareLog.Index] {
+			if !r.pendingPrepares[prepareLog.GetIndex()] {
 				err = errors.Wrap(kt.ErrInvalidLog, "previous prepare already committed/rollback")
 				return
 			}
-			r.lastCommit = l.Index
+			r.lastCommit = l.GetIndex()
 			// resolve previous prepared
-			delete(r.pendingPrepares, prepareLog.Index)
-		case kt.LogRollback:
-			var prepareLog *kt.Log
+			delete(r.pendingPrepares, prepareLog.GetIndex())
+		case kt.LogTypeRollback:
+			var prepareLog *kt.LogPrepare
 			if _, prepareLog, err = r.getPrepareLog(context.Background(), l); err != nil {
 				err = errors.Wrap(err, "previous prepare does not exists, node need full recovery")
 				return
 			}
-			if !r.pendingPrepares[prepareLog.Index] {
+			if !r.pendingPrepares[prepareLog.GetIndex()] {
 				err = errors.Wrap(kt.ErrInvalidLog, "previous prepare already committed/rollback")
 				return
 			}
 			// resolve previous prepared
-			delete(r.pendingPrepares, prepareLog.Index)
+			delete(r.pendingPrepares, prepareLog.GetIndex())
 		default:
-			err = errors.Wrapf(kt.ErrInvalidLog, "invalid log type: %v", l.Type)
+			err = errors.Wrapf(kt.ErrInvalidLog, "invalid log type: %v", l.GetType())
 			return
 		}
 
 		// record nextIndex
-		r.updateNextIndex(context.Background(), l)
+		r.updateNextIndex(context.Background(), l.GetIndex())
 	}
 
 	return

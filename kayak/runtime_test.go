@@ -17,10 +17,8 @@
 package kayak_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net"
@@ -38,10 +36,10 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/proto"
 	crpc "github.com/CovenantSQL/CovenantSQL/rpc"
 	"github.com/CovenantSQL/CovenantSQL/storage"
+	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
 	mock_conn "github.com/jordwest/mock-conn"
-	"github.com/pkg/errors"
 	. "github.com/smartystreets/goconvey/convey"
 	"github.com/xtaci/smux"
 )
@@ -65,13 +63,6 @@ type sqliteStorage struct {
 	dsn string
 }
 
-type queryStructure struct {
-	ConnID    uint64
-	SeqNo     uint64
-	Timestamp int64
-	Queries   []storage.Query
-}
-
 func newSQLiteStorage(dsn string) (s *sqliteStorage, err error) {
 	s = &sqliteStorage{}
 	s.st, err = storage.New(dsn)
@@ -79,42 +70,28 @@ func newSQLiteStorage(dsn string) (s *sqliteStorage, err error) {
 	return
 }
 
-func (s *sqliteStorage) EncodePayload(request interface{}) (data []byte, err error) {
-	var buf *bytes.Buffer
-	if buf, err = utils.EncodeMsgPack(request); err != nil {
-		err = errors.Wrap(err, "encode payload failed")
-		return
-	}
-
-	data = buf.Bytes()
-	return
-}
-
-func (s *sqliteStorage) DecodePayload(data []byte) (request interface{}, err error) {
-	var req *queryStructure
-	if err = utils.DecodeMsgPack(data, &req); err != nil {
-		err = errors.Wrap(err, "decode payload failed")
-		return
-	}
-
-	request = req
-	return
-}
-
-func (s *sqliteStorage) Check(data interface{}) (err error) {
+func (s *sqliteStorage) Check(req *types.Request) (err error) {
 	// no check
 	return nil
 }
 
-func (s *sqliteStorage) Commit(data interface{}, isLeader bool) (result interface{}, err error) {
-	var d *queryStructure
-	var ok bool
-	if d, ok = data.(*queryStructure); !ok {
-		err = errors.New("invalid data")
-		return
+func (s *sqliteStorage) Commit(req *types.Request, isLeader bool) (result interface{}, err error) {
+	var queries []storage.Query
+
+	for _, q := range req.Payload.Queries {
+		var args []sql.NamedArg
+
+		for _, v := range q.Args {
+			args = append(args, sql.Named(v.Name, v.Value))
+		}
+
+		queries = append(queries, storage.Query{
+			Pattern: q.Pattern,
+			Args:    args,
+		})
 	}
 
-	result, err = s.st.Exec(context.Background(), d.Queries)
+	result, err = s.st.Exec(context.Background(), queries)
 
 	return
 }
@@ -126,7 +103,7 @@ func (s *sqliteStorage) Query(ctx context.Context, queries []storage.Query) (col
 
 func (s *sqliteStorage) Close() {
 	if s.st != nil {
-		s.st.Close()
+		_ = s.st.Close()
 	}
 }
 
@@ -159,7 +136,7 @@ func newFakeService(rt *kayak.Runtime) (fs *fakeService) {
 		s:  rpc.NewServer(),
 	}
 
-	fs.s.RegisterName("Test", fs)
+	_ = fs.s.RegisterName("Test", fs)
 
 	return
 }
@@ -170,7 +147,7 @@ func (s *fakeService) Apply(req *kt.ApplyRequest, resp *interface{}) (err error)
 }
 
 func (s *fakeService) Fetch(req *kt.FetchRequest, resp *kt.FetchResponse) (err error) {
-	var l *kt.Log
+	var l kt.Log
 	if l, err = s.rt.Fetch(req.GetContext(), req.Index); err != nil {
 		return
 	}
@@ -318,9 +295,11 @@ func TestRuntime(t *testing.T) {
 		So(err, ShouldBeNil)
 		defer rt2.Shutdown()
 
-		q1 := &queryStructure{
-			Queries: []storage.Query{
-				{Pattern: "CREATE TABLE IF NOT EXISTS test (t1 text, t2 text, t3 text)"},
+		q1 := &types.Request{
+			Payload: types.RequestPayload{
+				Queries: []types.Query{
+					{Pattern: "CREATE TABLE IF NOT EXISTS test (t1 text, t2 text, t3 text)"},
+				},
 			},
 		}
 		So(err, ShouldBeNil)
@@ -329,23 +308,25 @@ func TestRuntime(t *testing.T) {
 		r2 := RandStringRunes(333)
 		r3 := RandStringRunes(333)
 
-		q2 := &queryStructure{
-			Queries: []storage.Query{
-				{
-					Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
-					Args: []sql.NamedArg{
-						sql.Named("", r1),
-						sql.Named("", r2),
-						sql.Named("", r3),
+		q2 := &types.Request{
+			Payload: types.RequestPayload{
+				Queries: []types.Query{
+					{
+						Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
+						Args: []types.NamedArg{
+							{Value: r1},
+							{Value: r2},
+							{Value: r3},
+						},
 					},
 				},
 			},
 		}
 
-		rt1.Apply(context.Background(), q1)
-		rt2.Apply(context.Background(), q2)
-		rt1.Apply(context.Background(), q2)
-		db1.Query(context.Background(), []storage.Query{
+		_, _, _ = rt1.Apply(context.Background(), q1)
+		_, _, _ = rt2.Apply(context.Background(), q2)
+		_, _, _ = rt1.Apply(context.Background(), q2)
+		_, _, _, _ = db1.Query(context.Background(), []storage.Query{
 			{Pattern: "SELECT * FROM test"},
 		})
 
@@ -354,14 +335,16 @@ func TestRuntime(t *testing.T) {
 
 		for i := 0; i != 2000; i++ {
 			atomic.AddUint64(&count, 1)
-			q := &queryStructure{
-				Queries: []storage.Query{
-					{
-						Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
-						Args: []sql.NamedArg{
-							sql.Named("", r1),
-							sql.Named("", r2),
-							sql.Named("", r3),
+			q := &types.Request{
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
+							Args: []types.NamedArg{
+								{Value: r1},
+								{Value: r2},
+								{Value: r3},
+							},
 						},
 					},
 				},
@@ -372,10 +355,12 @@ func TestRuntime(t *testing.T) {
 		}
 
 		// test rollback
-		q := &queryStructure{
-			Queries: []storage.Query{
-				{
-					Pattern: "INVALID QUERY",
+		q := &types.Request{
+			Payload: types.RequestPayload{
+				Queries: []types.Query{
+					{
+						Pattern: "INVALID QUERY",
+					},
 				},
 			},
 		}
@@ -383,14 +368,16 @@ func TestRuntime(t *testing.T) {
 		So(err, ShouldNotBeNil)
 
 		// test timeout
-		q = &queryStructure{
-			Queries: []storage.Query{
-				{
-					Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
-					Args: []sql.NamedArg{
-						sql.Named("", r1),
-						sql.Named("", r2),
-						sql.Named("", r3),
+		q = &types.Request{
+			Payload: types.RequestPayload{
+				Queries: []types.Query{
+					{
+						Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
+						Args: []types.NamedArg{
+							{Value: r1},
+							{Value: r2},
+							{Value: r3},
+						},
 					},
 				},
 			},
@@ -450,49 +437,61 @@ func TestRuntime(t *testing.T) {
 		})
 		So(err, ShouldNotBeNil)
 	})
+}
+
+func TestRuntime_2(t *testing.T) {
 	Convey("test log loading", t, func() {
 		w, err := kl.NewLevelDBWal("testLoad.db")
 		defer os.RemoveAll("testLoad.db")
 		So(err, ShouldBeNil)
-		err = w.Write(&kt.Log{
+		err = w.Write(&kt.LogPrepare{
 			LogHeader: kt.LogHeader{
-				Index:    0,
-				Type:     kt.LogPrepare,
-				Producer: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+				Index: 0,
+				Type:  kt.LogTypePrepare,
 			},
-			Data: []byte("happy1"),
+			Request: &types.Request{
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "happy1",
+						},
+					},
+				},
+			},
 		})
 		So(err, ShouldBeNil)
-		err = w.Write(&kt.Log{
+		_, _ = w.Get(0)
+		err = w.Write(&kt.LogPrepare{
 			LogHeader: kt.LogHeader{
-				Index:    1,
-				Type:     kt.LogPrepare,
-				Producer: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+				Index: 1,
+				Type:  kt.LogTypePrepare,
 			},
-			Data: []byte("happy1"),
+			Request: &types.Request{
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "happy2",
+						},
+					},
+				},
+			},
 		})
 		So(err, ShouldBeNil)
-		data := make([]byte, 16)
-		binary.BigEndian.PutUint64(data, 0) // prepare log index
-		binary.BigEndian.PutUint64(data, 0) // last commit index
-		err = w.Write(&kt.Log{
+		err = w.Write(&kt.LogCommit{
 			LogHeader: kt.LogHeader{
-				Index:    2,
-				Type:     kt.LogCommit,
-				Producer: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+				Index: 2,
+				Type:  kt.LogTypeCommit,
 			},
-			Data: data,
+			PrepareIndex:  0,
+			LastCommitted: 0,
 		})
 		So(err, ShouldBeNil)
-		data = make([]byte, 8)
-		binary.BigEndian.PutUint64(data, 1) // prepare log index
-		err = w.Write(&kt.Log{
+		err = w.Write(&kt.LogRollback{
 			LogHeader: kt.LogHeader{
-				Index:    3,
-				Type:     kt.LogRollback,
-				Producer: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+				Index: 3,
+				Type:  kt.LogTypeRollback,
 			},
-			Data: data,
+			PrepareIndex: 1,
 		})
 		So(err, ShouldBeNil)
 		w.Close()
@@ -531,10 +530,10 @@ func TestRuntime(t *testing.T) {
 		So(err, ShouldBeNil)
 
 		So(rt.Start(), ShouldBeNil)
-		So(func() { rt.Start() }, ShouldNotPanic)
+		So(func() { _ = rt.Start() }, ShouldNotPanic)
 
 		So(rt.Shutdown(), ShouldBeNil)
-		So(func() { rt.Shutdown() }, ShouldNotPanic)
+		So(func() { _ = rt.Shutdown() }, ShouldNotPanic)
 	})
 }
 
@@ -550,13 +549,13 @@ func BenchmarkRuntime(b *testing.B) {
 		So(err, ShouldBeNil)
 		defer func() {
 			db1.Close()
-			os.Remove("test1.db")
+			_ = os.Remove("test1.db")
 		}()
 		db2, err := newSQLiteStorage("test2.db")
 		So(err, ShouldBeNil)
 		defer func() {
 			db2.Close()
-			os.Remove("test2.db")
+			_ = os.Remove("test2.db")
 		}()
 
 		node1 := proto.NodeID("000005aa62048f85da4ae9698ed59c14ec0d48a88a07c15a32265634e7e64ade")
@@ -630,9 +629,11 @@ func BenchmarkRuntime(b *testing.B) {
 		So(err, ShouldBeNil)
 		defer rt2.Shutdown()
 
-		q1 := &queryStructure{
-			Queries: []storage.Query{
-				{Pattern: "CREATE TABLE IF NOT EXISTS test (t1 text, t2 text, t3 text)"},
+		q1 := &types.Request{
+			Payload: types.RequestPayload{
+				Queries: []types.Query{
+					{Pattern: "CREATE TABLE IF NOT EXISTS test (t1 text, t2 text, t3 text)"},
+				},
 			},
 		}
 		So(err, ShouldBeNil)
@@ -641,14 +642,16 @@ func BenchmarkRuntime(b *testing.B) {
 		r2 := RandStringRunes(333)
 		r3 := RandStringRunes(333)
 
-		q2 := &queryStructure{
-			Queries: []storage.Query{
-				{
-					Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
-					Args: []sql.NamedArg{
-						sql.Named("", r1),
-						sql.Named("", r2),
-						sql.Named("", r3),
+		q2 := &types.Request{
+			Payload: types.RequestPayload{
+				Queries: []types.Query{
+					{
+						Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
+						Args: []types.NamedArg{
+							{Value: r1},
+							{Value: r2},
+							{Value: r3},
+						},
 					},
 				},
 			},
@@ -669,14 +672,16 @@ func BenchmarkRuntime(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				atomic.AddUint64(&count, 1)
-				q := &queryStructure{
-					Queries: []storage.Query{
-						{
-							Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
-							Args: []sql.NamedArg{
-								sql.Named("", r1),
-								sql.Named("", r2),
-								sql.Named("", r3),
+				q := &types.Request{
+					Payload: types.RequestPayload{
+						Queries: []types.Query{
+							{
+								Pattern: "INSERT INTO test (t1, t2, t3) VALUES(?, ?, ?)",
+								Args: []types.NamedArg{
+									{Value: r1},
+									{Value: r2},
+									{Value: r3},
+								},
 							},
 						},
 					},

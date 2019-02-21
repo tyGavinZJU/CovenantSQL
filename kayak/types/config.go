@@ -24,6 +24,15 @@ import (
 
 // RuntimeConfig defines the runtime config of kayak.
 type RuntimeConfig struct {
+	// backlog for accepting requests.
+	Backlog uint32
+	// max inflight accepting requests.
+	MaxInflight uint32
+	// timeout to do a new election.
+	LeaderTimeout time.Duration
+	// timeout to send heartbeat to follower on no new logs.
+	HeartbeatTimeout time.Duration
+
 	// underlying handler.
 	Handler Handler
 	// minimum rpc success node percent requirement for prepare operation.

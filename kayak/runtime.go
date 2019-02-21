@@ -25,6 +25,7 @@ import (
 
 	kt "github.com/CovenantSQL/CovenantSQL/kayak/types"
 	"github.com/CovenantSQL/CovenantSQL/proto"
+	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
 	"github.com/CovenantSQL/CovenantSQL/utils/timer"
 	"github.com/CovenantSQL/CovenantSQL/utils/trace"
@@ -113,10 +114,10 @@ type Runtime struct {
 // commitReq defines the commit operation input.
 type commitReq struct {
 	ctx        context.Context
-	data       interface{}
+	data       *types.Request
 	index      uint64
 	lastCommit uint64
-	log        *kt.Log
+	log        *kt.LogCommit
 	result     *commitFuture
 	tm         *timer.Timer
 }
@@ -285,7 +286,7 @@ func (r *Runtime) Shutdown() (err error) {
 }
 
 // Apply defines entry for Leader node.
-func (r *Runtime) Apply(ctx context.Context, req interface{}) (result interface{}, logIndex uint64, err error) {
+func (r *Runtime) Apply(ctx context.Context, req *types.Request) (result interface{}, logIndex uint64, err error) {
 	if atomic.LoadUint32(&r.started) != 1 {
 		err = kt.ErrStopped
 		return
@@ -318,7 +319,7 @@ func (r *Runtime) Apply(ctx context.Context, req interface{}) (result interface{
 	prepareLog, err := r.doLeaderPrepare(ctx, tm, req)
 
 	if prepareLog != nil {
-		defer r.markPrepareFinished(ctx, prepareLog.Index)
+		defer r.markPrepareFinished(ctx, prepareLog.GetIndex())
 	}
 
 	if err == nil {
@@ -335,7 +336,7 @@ func (r *Runtime) Apply(ctx context.Context, req interface{}) (result interface{
 }
 
 // Fetch defines entry for missing log fetch.
-func (r *Runtime) Fetch(ctx context.Context, index uint64) (l *kt.Log, err error) {
+func (r *Runtime) Fetch(ctx context.Context, index uint64) (l kt.Log, err error) {
 	if atomic.LoadUint32(&r.started) != 1 {
 		err = kt.ErrStopped
 		return
@@ -366,7 +367,7 @@ func (r *Runtime) Fetch(ctx context.Context, index uint64) (l *kt.Log, err error
 }
 
 // FollowerApply defines entry for follower node.
-func (r *Runtime) FollowerApply(l *kt.Log) (err error) {
+func (r *Runtime) FollowerApply(l kt.Log) (err error) {
 	if l == nil {
 		err = errors.Wrap(kt.ErrInvalidLog, "log is nil")
 		return
@@ -376,7 +377,7 @@ func (r *Runtime) FollowerApply(l *kt.Log) (err error) {
 		return
 	}
 
-	ctx, task := trace.NewTask(context.Background(), "Kayak.FollowerApply."+l.Type.String())
+	ctx, task := trace.NewTask(context.Background(), "Kayak.FollowerApply."+l.GetType().String())
 	defer task.End()
 
 	tm := timer.NewTimer()
@@ -384,8 +385,8 @@ func (r *Runtime) FollowerApply(l *kt.Log) (err error) {
 	defer func() {
 		log.
 			WithFields(log.Fields{
-				"t": l.Type.String(),
-				"i": l.Index,
+				"t": l.GetType().String(),
+				"i": l.GetIndex(),
 			}).
 			WithFields(tm.ToLogFields()).
 			WithError(err).
@@ -404,18 +405,32 @@ func (r *Runtime) FollowerApply(l *kt.Log) (err error) {
 	}
 
 	// verify log structure
-	switch l.Type {
-	case kt.LogPrepare:
-		err = r.followerPrepare(ctx, tm, l)
-	case kt.LogRollback:
-		err = r.followerRollback(ctx, tm, l)
-	case kt.LogCommit:
-		err = r.followerCommit(ctx, tm, l)
+dispatchLog:
+	for {
+		switch v := l.(type) {
+		case *kt.LogPrepare:
+			err = r.followerPrepare(ctx, tm, v)
+			break dispatchLog
+		case *kt.LogRollback:
+			err = r.followerRollback(ctx, tm, v)
+			break dispatchLog
+		case *kt.LogCommit:
+			err = r.followerCommit(ctx, tm, v)
+			break dispatchLog
+		case *kt.LogWrapper:
+			l = v.Unwrap()
+		case *kt.LogNoop:
+			break dispatchLog
+		default:
+			// unknown log, ignore
+			err = errors.Wrap(kt.ErrInvalidLogType, "unknown log type")
+			break dispatchLog
+		}
 	}
 
 	if err == nil {
-		r.updateNextIndex(ctx, l)
-		r.triggerLogAwaits(l.Index)
+		r.updateNextIndex(ctx, l.GetIndex())
+		r.triggerLogAwaits(l.GetIndex())
 	}
 
 	return
@@ -429,14 +444,14 @@ func (r *Runtime) UpdatePeers(peers *proto.Peers) (err error) {
 	return
 }
 
-func (r *Runtime) updateNextIndex(ctx context.Context, l *kt.Log) {
+func (r *Runtime) updateNextIndex(ctx context.Context, logIndex uint64) {
 	defer trace.StartRegion(ctx, "updateNextIndex").End()
 
 	r.nextIndexLock.Lock()
 	defer r.nextIndexLock.Unlock()
 
-	if r.nextIndex < l.Index+1 {
-		r.nextIndex = l.Index + 1
+	if r.nextIndex < logIndex+1 {
+		r.nextIndex = logIndex + 1
 	}
 }
 

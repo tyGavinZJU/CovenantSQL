@@ -23,6 +23,7 @@ import (
 
 	kt "github.com/CovenantSQL/CovenantSQL/kayak/types"
 	"github.com/CovenantSQL/CovenantSQL/proto"
+	"github.com/CovenantSQL/CovenantSQL/types"
 	. "github.com/smartystreets/goconvey/convey"
 )
 
@@ -39,13 +40,25 @@ func TestLevelDBWal_Write(t *testing.T) {
 		err = p.Write(nil)
 		So(err, ShouldNotBeNil)
 
-		l1 := &kt.Log{
+		l1 := &kt.LogPrepare{
 			LogHeader: kt.LogHeader{
-				Index:    0,
-				Type:     kt.LogPrepare,
-				Producer: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+				Index: 0,
+				Type:  kt.LogTypePrepare,
 			},
-			Data: []byte("happy1"),
+			Request: &types.Request{
+				Header: types.SignedRequestHeader{
+					RequestHeader: types.RequestHeader{
+						NodeID: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+					},
+				},
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "happy1",
+						},
+					},
+				},
+			},
 		}
 
 		err = p.Write(l1)
@@ -54,42 +67,88 @@ func TestLevelDBWal_Write(t *testing.T) {
 		So(err, ShouldNotBeNil)
 
 		// test get
-		var l *kt.Log
+		var l kt.Log
 		l, err = p.Get(l1.Index)
 		So(err, ShouldBeNil)
-		So(l, ShouldResemble, l1)
+		switch v := l.(type) {
+		case *kt.LogPrepare:
+			So(v, ShouldResemble, l1)
+		case *kt.LogWrapper:
+			So(v.Unwrap(), ShouldResemble, l1)
+		default:
+			t.Fail()
+		}
 
 		_, err = p.Get(10000)
 		So(err, ShouldNotBeNil)
 
 		// test consecutive writes
-		l2 := &kt.Log{
+		l2 := &kt.LogPrepare{
 			LogHeader: kt.LogHeader{
 				Index: 1,
-				Type:  kt.LogPrepare,
+				Type:  kt.LogTypePrepare,
 			},
-			Data: []byte("happy2"),
+			Request: &types.Request{
+				Header: types.SignedRequestHeader{
+					RequestHeader: types.RequestHeader{
+						NodeID: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+					},
+				},
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "happy2",
+						},
+					},
+				},
+			},
 		}
 		err = p.Write(l2)
 		So(err, ShouldBeNil)
 
 		// test not consecutive writes
-		l4 := &kt.Log{
+		l4 := &kt.LogPrepare{
 			LogHeader: kt.LogHeader{
 				Index: 3,
-				Type:  kt.LogPrepare,
+				Type:  kt.LogTypePrepare,
 			},
-			Data: []byte("happy3"),
+			Request: &types.Request{
+				Header: types.SignedRequestHeader{
+					RequestHeader: types.RequestHeader{
+						NodeID: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+					},
+				},
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "happy3",
+						},
+					},
+				},
+			},
 		}
 		err = p.Write(l4)
 		So(err, ShouldBeNil)
 
-		l3 := &kt.Log{
+		l3 := &kt.LogPrepare{
 			LogHeader: kt.LogHeader{
 				Index: 2,
-				Type:  kt.LogPrepare,
+				Type:  kt.LogTypePrepare,
 			},
-			Data: []byte("happy4"),
+			Request: &types.Request{
+				Header: types.SignedRequestHeader{
+					RequestHeader: types.RequestHeader{
+						NodeID: proto.NodeID("0000000000000000000000000000000000000000000000000000000000000000"),
+					},
+				},
+				Payload: types.RequestPayload{
+					Queries: []types.Query{
+						{
+							Pattern: "happy4",
+						},
+					},
+				},
+			},
 		}
 		err = p.Write(l3)
 		So(err, ShouldBeNil)
@@ -115,7 +174,7 @@ func TestLevelDBWal_Write(t *testing.T) {
 		for i := 0; i != 4; i++ {
 			l, err = p.Read()
 			So(err, ShouldBeNil)
-			So(l.Index, ShouldEqual, i)
+			So(l.GetIndex(), ShouldEqual, i)
 		}
 
 		_, err = p.Read()
@@ -131,7 +190,7 @@ func TestLevelDBWal_Write(t *testing.T) {
 		for i := 0; i != 3; i++ {
 			l, err = p.Read()
 			So(err, ShouldBeNil)
-			So(l.Index, ShouldEqual, i)
+			So(l.GetIndex(), ShouldEqual, i)
 		}
 
 		p.Close()

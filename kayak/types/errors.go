@@ -35,4 +35,10 @@ var (
 	ErrInvalidConfig = errors.New("invalid runtime config")
 	// ErrStopped represents runtime not started.
 	ErrStopped = errors.New("stopped")
+	// ErrMsgPackVersionMismatch represents the msgpack library abi has changed.
+	ErrMsgPackVersionMismatch = errors.New("msgpack library version mismatch")
+	// ErrInvalidContainerType represents invalid container type read from msgpack bytes.
+	ErrInvalidContainerType = errors.New("invalid container type for LogWrapper")
+	// ErrInvalidLogType represents invalid transaction type read from msgpack bytes.
+	ErrInvalidLogType = errors.New("invalid log type, can not instantiate log")
 )

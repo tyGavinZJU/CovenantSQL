@@ -16,10 +16,10 @@
 
 package types
 
+import "github.com/CovenantSQL/CovenantSQL/types"
+
 // Handler defines the main underlying fsm of kayak.
 type Handler interface {
-	EncodePayload(req interface{}) (data []byte, err error)
-	DecodePayload(data []byte) (req interface{}, err error)
-	Check(request interface{}) error
-	Commit(request interface{}, isLeader bool) (result interface{}, err error)
+	Check(request *types.Request) error
+	Commit(request *types.Request, isLeader bool) (result interface{}, err error)
 }

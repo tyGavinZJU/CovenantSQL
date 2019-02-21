@@ -27,7 +27,7 @@ import (
 // MemWal defines a toy wal using memory as storage.
 type MemWal struct {
 	sync.RWMutex
-	logs     []*kt.Log
+	logs     []kt.Log
 	revIndex map[uint64]int
 	offset   uint64
 	closed   uint32
@@ -37,14 +37,14 @@ type MemWal struct {
 func NewMemWal() (p *MemWal) {
 	p = &MemWal{
 		revIndex: make(map[uint64]int, 100000),
-		logs:     make([]*kt.Log, 0, 100000),
+		logs:     make([]kt.Log, 0, 100000),
 	}
 
 	return
 }
 
 // Write implements Wal.Write.
-func (p *MemWal) Write(l *kt.Log) (err error) {
+func (p *MemWal) Write(l kt.Log) (err error) {
 	if atomic.LoadUint32(&p.closed) == 1 {
 		err = ErrWalClosed
 		return
@@ -58,7 +58,7 @@ func (p *MemWal) Write(l *kt.Log) (err error) {
 	p.Lock()
 	defer p.Unlock()
 
-	if _, exists := p.revIndex[l.Index]; exists {
+	if _, exists := p.revIndex[l.GetIndex()]; exists {
 		err = ErrAlreadyExists
 		return
 	}
@@ -67,13 +67,13 @@ func (p *MemWal) Write(l *kt.Log) (err error) {
 	p.logs = append(p.logs, nil)
 	copy(p.logs[offset+1:], p.logs[offset:])
 	p.logs[offset] = l
-	p.revIndex[l.Index] = int(offset)
+	p.revIndex[l.GetIndex()] = int(offset)
 
 	return
 }
 
 // Read implements Wal.Read.
-func (p *MemWal) Read() (l *kt.Log, err error) {
+func (p *MemWal) Read() (l kt.Log, err error) {
 	if atomic.LoadUint32(&p.closed) == 1 {
 		err = ErrWalClosed
 		return
@@ -84,7 +84,7 @@ func (p *MemWal) Read() (l *kt.Log, err error) {
 }
 
 // Get implements Wal.Get.
-func (p *MemWal) Get(index uint64) (l *kt.Log, err error) {
+func (p *MemWal) Get(index uint64) (l kt.Log, err error) {
 	if atomic.LoadUint32(&p.closed) == 1 {
 		err = ErrWalClosed
 		return

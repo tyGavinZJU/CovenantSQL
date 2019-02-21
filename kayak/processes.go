@@ -20,13 +20,14 @@ import (
 	"context"
 
 	kt "github.com/CovenantSQL/CovenantSQL/kayak/types"
+	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
 	"github.com/CovenantSQL/CovenantSQL/utils/timer"
 	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 	"github.com/pkg/errors"
 )
 
-func (r *Runtime) doLeaderPrepare(ctx context.Context, tm *timer.Timer, req interface{}) (prepareLog *kt.Log, err error) {
+func (r *Runtime) doLeaderPrepare(ctx context.Context, tm *timer.Timer, req *types.Request) (prepareLog *kt.LogPrepare, err error) {
 	defer trace.StartRegion(ctx, "doLeaderPrepare").End()
 
 	// check prepare in leader
@@ -37,17 +38,8 @@ func (r *Runtime) doLeaderPrepare(ctx context.Context, tm *timer.Timer, req inte
 
 	tm.Add("leader_check")
 
-	// encode request
-	var encBuf []byte
-	if encBuf, err = r.doEncodePayload(ctx, req); err != nil {
-		err = errors.Wrap(err, "encode kayak payload failed")
-		return
-	}
-
-	tm.Add("leader_encode_payload")
-
 	// create prepare request
-	if prepareLog, err = r.leaderLogPrepare(ctx, tm, encBuf); err != nil {
+	if prepareLog, err = r.leaderLogPrepare(ctx, tm, req); err != nil {
 		// serve error, leader could not write logs, change leader in block producer
 		// TODO(): CHANGE LEADER
 		return
@@ -77,7 +69,7 @@ func (r *Runtime) doLeaderPrepare(ctx context.Context, tm *timer.Timer, req inte
 	return
 }
 
-func (r *Runtime) doLeaderCommit(ctx context.Context, tm *timer.Timer, prepareLog *kt.Log, req interface{}) (
+func (r *Runtime) doLeaderCommit(ctx context.Context, tm *timer.Timer, prepareLog *kt.LogPrepare, req *types.Request) (
 	result interface{}, logIndex uint64, err error) {
 	defer trace.StartRegion(ctx, "doLeaderCommit").End()
 	var commitResult *commitResult
@@ -98,12 +90,12 @@ func (r *Runtime) doLeaderCommit(ctx context.Context, tm *timer.Timer, prepareLo
 	return
 }
 
-func (r *Runtime) doLeaderRollback(ctx context.Context, tm *timer.Timer, prepareLog *kt.Log) {
+func (r *Runtime) doLeaderRollback(ctx context.Context, tm *timer.Timer, prepareLog *kt.LogPrepare) {
 	defer trace.StartRegion(ctx, "doLeaderRollback").End()
 	// rollback local
-	var rollbackLog *kt.Log
+	var rollbackLog *kt.LogRollback
 	var logErr error
-	if rollbackLog, logErr = r.leaderLogRollback(ctx, tm, prepareLog.Index); logErr != nil {
+	if rollbackLog, logErr = r.leaderLogRollback(ctx, tm, prepareLog.GetIndex()); logErr != nil {
 		// serve error, construct rollback log failed, internal error
 		// TODO(): CHANGE LEADER
 		return
@@ -117,33 +109,34 @@ func (r *Runtime) doLeaderRollback(ctx context.Context, tm *timer.Timer, prepare
 	tm.Add("follower_rollback")
 }
 
-func (r *Runtime) leaderLogPrepare(ctx context.Context, tm *timer.Timer, data []byte) (*kt.Log, error) {
+func (r *Runtime) leaderLogPrepare(ctx context.Context, tm *timer.Timer, req *types.Request) (l *kt.LogPrepare, err error) {
 	defer trace.StartRegion(ctx, "leaderLogPrepare").End()
 	defer tm.Add("leader_log_prepare")
-	// just write new log
-	return r.newLog(ctx, kt.LogPrepare, data)
+	logIndex := r.allocateNextIndex()
+	l = kt.NewLogPrepare()
+	l.SetIndex(logIndex)
+	l.Request = req
+	err = r.writeWAL(ctx, l)
+	return
 }
 
-func (r *Runtime) leaderLogRollback(ctx context.Context, tm *timer.Timer, i uint64) (*kt.Log, error) {
+func (r *Runtime) leaderLogRollback(ctx context.Context, tm *timer.Timer, i uint64) (l *kt.LogRollback, err error) {
 	defer trace.StartRegion(ctx, "leaderLogRollback").End()
 	defer tm.Add("leader_log_rollback")
-	// just write new log
-	return r.newLog(ctx, kt.LogRollback, r.uint64ToBytes(i))
+	logIndex := r.allocateNextIndex()
+	l = kt.NewLogRollback()
+	l.SetIndex(logIndex)
+	l.PrepareIndex = i
+	err = r.writeWAL(ctx, l)
+	return
 }
 
-func (r *Runtime) followerPrepare(ctx context.Context, tm *timer.Timer, l *kt.Log) (err error) {
+func (r *Runtime) followerPrepare(ctx context.Context, tm *timer.Timer, l *kt.LogPrepare) (err error) {
 	defer func() {
-		log.WithField("r", l.Index).WithFields(tm.ToLogFields()).Debug("kayak follower prepare stat")
+		log.WithField("r", l.GetIndex()).WithFields(tm.ToLogFields()).Debug("kayak follower prepare stat")
 	}()
 
-	// decode
-	var req interface{}
-	if req, err = r.doDecodePayload(ctx, l.Data); err != nil {
-		return
-	}
-	tm.Add("decode")
-
-	if err = r.doCheck(ctx, req); err != nil {
+	if err = r.doCheck(ctx, l.Request); err != nil {
 		return
 	}
 	tm.Add("check")
@@ -161,8 +154,8 @@ func (r *Runtime) followerPrepare(ctx context.Context, tm *timer.Timer, l *kt.Lo
 	return
 }
 
-func (r *Runtime) followerRollback(ctx context.Context, tm *timer.Timer, l *kt.Log) (err error) {
-	var prepareLog *kt.Log
+func (r *Runtime) followerRollback(ctx context.Context, tm *timer.Timer, l *kt.LogRollback) (err error) {
+	var prepareLog *kt.LogPrepare
 	if _, prepareLog, err = r.getPrepareLog(ctx, l); err != nil || prepareLog == nil {
 		err = errors.Wrap(err, "get original request in rollback failed")
 		return
@@ -188,15 +181,15 @@ func (r *Runtime) followerRollback(ctx context.Context, tm *timer.Timer, l *kt.L
 	return
 }
 
-func (r *Runtime) followerCommit(ctx context.Context, tm *timer.Timer, l *kt.Log) (err error) {
+func (r *Runtime) followerCommit(ctx context.Context, tm *timer.Timer, l *kt.LogCommit) (err error) {
 	var (
-		prepareLog *kt.Log
+		prepareLog *kt.LogPrepare
 		lastCommit uint64
 		cResult    *commitResult
 	)
 
 	defer func() {
-		log.WithField("r", l.Index).WithFields(tm.ToLogFields()).Debug("kayak follower commit stat")
+		log.WithField("r", l.GetIndex()).WithFields(tm.ToLogFields()).Debug("kayak follower commit stat")
 	}()
 
 	if lastCommit, prepareLog, err = r.getPrepareLog(ctx, l); err != nil {

@@ -22,13 +22,14 @@ import (
 
 	kt "github.com/CovenantSQL/CovenantSQL/kayak/types"
 	"github.com/CovenantSQL/CovenantSQL/proto"
+	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
 	"github.com/CovenantSQL/CovenantSQL/utils/timer"
 	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 	"github.com/pkg/errors"
 )
 
-func (r *Runtime) leaderCommitResult(ctx context.Context, tm *timer.Timer, reqPayload interface{}, prepareLog *kt.Log) (res *commitFuture) {
+func (r *Runtime) leaderCommitResult(ctx context.Context, tm *timer.Timer, reqPayload *types.Request, prepareLog *kt.LogPrepare) (res *commitFuture) {
 	defer trace.StartRegion(ctx, "leaderCommitResult").End()
 
 	// decode log and send to commit channel to process
@@ -43,7 +44,7 @@ func (r *Runtime) leaderCommitResult(ctx context.Context, tm *timer.Timer, reqPa
 	req := &commitReq{
 		ctx:    ctx,
 		data:   reqPayload,
-		index:  prepareLog.Index,
+		index:  prepareLog.GetIndex(),
 		result: res,
 		tm:     tm,
 	}
@@ -57,7 +58,7 @@ func (r *Runtime) leaderCommitResult(ctx context.Context, tm *timer.Timer, reqPa
 	return
 }
 
-func (r *Runtime) followerCommitResult(ctx context.Context, tm *timer.Timer, commitLog *kt.Log, prepareLog *kt.Log, lastCommit uint64) (res *commitFuture) {
+func (r *Runtime) followerCommitResult(ctx context.Context, tm *timer.Timer, commitLog *kt.LogCommit, prepareLog *kt.LogPrepare, lastCommit uint64) (res *commitFuture) {
 	defer trace.StartRegion(ctx, "followerCommitResult").End()
 
 	// decode log and send to commit channel to process
@@ -81,20 +82,10 @@ func (r *Runtime) followerCommitResult(ctx context.Context, tm *timer.Timer, com
 		return
 	}
 
-	// decode prepare log
-	var logReq interface{}
-	var err error
-	if logReq, err = r.doDecodePayload(ctx, prepareLog.Data); err != nil {
-		res.Set(&commitResult{err: errors.Wrap(err, "decode log payload failed")})
-		return
-	}
-
-	tm.Add("decode_payload")
-
 	req := &commitReq{
 		ctx:        ctx,
-		data:       logReq,
-		index:      prepareLog.Index,
+		data:       prepareLog.Request,
+		index:      prepareLog.GetIndex(),
 		lastCommit: lastCommit,
 		result:     res,
 		log:        commitLog,
@@ -136,17 +127,18 @@ func (r *Runtime) leaderDoCommit(req *commitReq) {
 
 	// create leader log
 	var (
-		l       *kt.Log
-		logData []byte
-		cr      = &commitResult{}
-		err     error
+		l   *kt.LogCommit
+		cr  = &commitResult{}
+		err error
 	)
 
-	logData = append(logData, r.uint64ToBytes(req.index)...)
-	logData = append(logData, r.uint64ToBytes(atomic.LoadUint64(&r.lastCommit))...)
+	logIndex := r.allocateNextIndex()
+	l = kt.NewLogCommit()
+	l.SetIndex(logIndex)
+	l.PrepareIndex = req.index
+	l.LastCommitted = atomic.LoadUint64(&r.lastCommit)
 
-	if l, err = r.newLog(req.ctx, kt.LogCommit, logData); err != nil {
-		// serve error, leader could not write log
+	if err = r.writeWAL(req.ctx, l); err != nil {
 		return
 	}
 
@@ -158,7 +150,7 @@ func (r *Runtime) leaderDoCommit(req *commitReq) {
 	req.tm.Add("db_write")
 
 	// mark last commit
-	atomic.StoreUint64(&r.lastCommit, l.Index)
+	atomic.StoreUint64(&r.lastCommit, l.GetIndex())
 
 	// send commit
 	cr.rpc = r.applyRPC(l, r.minCommitFollowers)
@@ -225,26 +217,50 @@ func (r *Runtime) followerDoCommit(req *commitReq) {
 	return
 }
 
-func (r *Runtime) getPrepareLog(ctx context.Context, l *kt.Log) (lastCommitIndex uint64, pl *kt.Log, err error) {
+func (r *Runtime) getPrepareLog(ctx context.Context, l kt.Log) (lastCommitIndex uint64, pl *kt.LogPrepare, err error) {
 	defer trace.StartRegion(ctx, "getPrepareLog").End()
 
-	var prepareIndex uint64
+	var (
+		prepareIndex      uint64
+		waitForLastCommit bool
+	)
 
-	// decode prepare index
-	if prepareIndex, err = r.bytesToUint64(l.Data); err != nil {
-		err = errors.Wrap(err, "log does not contain valid prepare index")
+	switch v := l.(type) {
+	case *kt.LogRollback:
+		prepareIndex = v.PrepareIndex
+	case *kt.LogCommit:
+		prepareIndex = v.PrepareIndex
+		lastCommitIndex = v.LastCommitted
+		waitForLastCommit = true
+	case *kt.LogWrapper:
+		return r.getPrepareLog(ctx, v.Unwrap())
+	default:
+		err = errors.Wrap(kt.ErrInvalidLogType, "invalid log type to get related prepare log")
 		return
 	}
 
-	if pl, err = r.waitForLog(ctx, prepareIndex); err != nil {
+	var rpl kt.Log
+
+	if rpl, err = r.waitForLog(ctx, prepareIndex); err != nil {
 		err = errors.Wrap(err, "wait for prepare log failed")
 		return
 	}
 
-	// decode commit index
-	if len(l.Data) >= 16 {
-		lastCommitIndex, _ = r.bytesToUint64(l.Data[8:])
+getPrepareLog:
+	for {
+		switch v := rpl.(type) {
+		case *kt.LogPrepare:
+			pl = v
+			break getPrepareLog
+		case *kt.LogWrapper:
+			rpl = v.Unwrap()
+		default:
+			err = errors.Wrap(kt.ErrInvalidLog, "invalid prepare log")
+			return
+		}
+	}
 
+	if waitForLastCommit && lastCommitIndex > 0 {
 		if _, err = r.waitForLog(ctx, lastCommitIndex); err != nil {
 			err = errors.Wrap(err, "wait for last commit log failed")
 			return

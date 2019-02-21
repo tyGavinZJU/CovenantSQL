@@ -121,7 +121,7 @@ func (t *rpcTracker) get(ctx context.Context) (errors map[proto.NodeID]error, me
 		traceType := "rpcCall"
 
 		if rawReq, ok := t.req.(*kt.ApplyRequest); ok {
-			traceType += rawReq.Log.Type.String()
+			traceType += rawReq.Log.GetType().String()
 		}
 
 		defer trace.StartRegion(ctx, traceType).End()

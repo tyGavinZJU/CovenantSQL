@@ -21,7 +21,6 @@ package main
 import (
 	"bytes"
 	"database/sql"
-	"encoding/binary"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -206,32 +205,14 @@ func BenchmarkSignSignature(b *testing.B) {
 		}
 	})
 
-	var buf *bytes.Buffer
-
-	b.ResetTimer()
-	b.Run("encode request", func(b *testing.B) {
-		for i := 0; i != b.N; i++ {
-			buf, _ = utils.EncodeMsgPack(r)
-		}
-	})
-
-	b.ResetTimer()
-	b.Run("decode request", func(b *testing.B) {
-		for i := 0; i != b.N; i++ {
-			var tr *types.Request
-			_ = utils.DecodeMsgPack(buf.Bytes(), &tr)
-		}
-	})
-
 	var buf2 *bytes.Buffer
-	l := &kt.Log{
+	l := &kt.LogPrepare{
 		LogHeader: kt.LogHeader{
-			Index:    1,
-			Version:  1,
-			Type:     kt.LogPrepare,
-			Producer: n.ToRawNodeID().ToNodeID(),
+			Index:   1,
+			Version: 1,
+			Type:    kt.LogTypePrepare,
 		},
-		Data: buf.Bytes(),
+		Request: r,
 	}
 
 	b.ResetTimer()
@@ -245,7 +226,7 @@ func BenchmarkSignSignature(b *testing.B) {
 	b.ResetTimer()
 	b.Run("decode from binlog format", func(b *testing.B) {
 		for i := 0; i != b.N; i++ {
-			var l2 *kt.Log
+			var l2 kt.Log
 			_ = utils.DecodeMsgPack(buf2.Bytes(), &l2)
 		}
 	})
@@ -317,19 +298,13 @@ func TestComputeMetrics(t *testing.T) {
 		err = r.Sign(priv)
 		So(err, ShouldBeNil)
 
-		buf, err := utils.EncodeMsgPack(r)
-		So(err, ShouldBeNil)
-
-		t.Logf("RequestSize: %v", len(buf.Bytes()))
-
-		l := &kt.Log{
+		l := &kt.LogPrepare{
 			LogHeader: kt.LogHeader{
-				Index:    1,
-				Version:  1,
-				Type:     kt.LogPrepare,
-				Producer: n.ToRawNodeID().ToNodeID(),
+				Index:   1,
+				Version: 1,
+				Type:    kt.LogTypePrepare,
 			},
-			Data: buf.Bytes(),
+			Request: r,
 		}
 
 		buf2, err := utils.EncodeMsgPack(l)
@@ -361,18 +336,14 @@ func TestComputeMetrics(t *testing.T) {
 
 		t.Logf("ResponseSize: %v", len(buf3.Bytes()))
 
-		bs := make([]byte, 16)
-		binary.BigEndian.PutUint64(bs, 1)
-		binary.BigEndian.PutUint64(bs, 2)
-
-		l2 := kt.Log{
+		l2 := kt.LogCommit{
 			LogHeader: kt.LogHeader{
-				Index:    1,
-				Version:  1,
-				Type:     kt.LogCommit,
-				Producer: n.ToRawNodeID().ToNodeID(),
+				Index:   1,
+				Version: 1,
+				Type:    kt.LogTypeCommit,
 			},
-			Data: bs,
+			PrepareIndex:  1,
+			LastCommitted: 2,
 		}
 
 		buf4, err := utils.EncodeMsgPack(l2)

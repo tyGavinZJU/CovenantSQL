@@ -32,10 +32,8 @@ import (
 )
 
 var (
-	// logHeaderKeyPrefix defines the leveldb header key prefix.
-	logHeaderKeyPrefix = []byte{'L', 'H'}
-	// logDataKeyPrefix defines the leveldb data key prefix.
-	logDataKeyPrefix = []byte{'L', 'D'}
+	// logKeyPrefix defines the leveldb log key prefix.
+	logKeyPrefix = []byte{'L'}
 )
 
 // LevelDBWal defines a toy wal using leveldb as storage.
@@ -59,7 +57,7 @@ func NewLevelDBWal(filename string) (p *LevelDBWal, err error) {
 }
 
 // Write implements Wal.Write.
-func (p *LevelDBWal) Write(l *kt.Log) (err error) {
+func (p *LevelDBWal) Write(l kt.Log) (err error) {
 	if atomic.LoadUint32(&p.closed) == 1 {
 		err = ErrWalClosed
 		return
@@ -73,10 +71,10 @@ func (p *LevelDBWal) Write(l *kt.Log) (err error) {
 		return
 	}
 
-	// build header headerKey
-	headerKey := append(append([]byte(nil), logHeaderKeyPrefix...), p.uint64ToBytes(l.Index)...)
+	// build key
+	var logKey = utils.ConcatAll(logKeyPrefix, p.uint64ToBytes(l.GetIndex()))
 
-	if _, err = p.db.Get(headerKey, nil); err != nil && err != leveldb.ErrNotFound {
+	if _, err = p.db.Get(logKey, nil); err != nil && err != leveldb.ErrNotFound {
 		err = errors.Wrap(err, "access leveldb failed")
 		return
 	} else if err == nil {
@@ -84,31 +82,15 @@ func (p *LevelDBWal) Write(l *kt.Log) (err error) {
 		return
 	}
 
-	dataKey := append(append([]byte(nil), logDataKeyPrefix...), p.uint64ToBytes(l.Index)...)
-
 	// write data first
 	var enc *bytes.Buffer
-	if enc, err = utils.EncodeMsgPack(l.Data); err != nil {
+	if enc, err = utils.EncodeMsgPack(l); err != nil {
 		err = errors.Wrap(err, "encode log data failed")
 		return
 	}
 
-	if err = p.db.Put(dataKey, enc.Bytes(), nil); err != nil {
+	if err = p.db.Put(logKey, enc.Bytes(), nil); err != nil {
 		err = errors.Wrap(err, "write log data failed")
-		return
-	}
-
-	// write header
-	l.DataLength = uint64(enc.Len())
-
-	if enc, err = utils.EncodeMsgPack(l.LogHeader); err != nil {
-		err = errors.Wrap(err, "encode log header failed")
-		return
-	}
-
-	// save header
-	if err = p.db.Put(headerKey, enc.Bytes(), nil); err != nil {
-		err = errors.Wrap(err, "encode log header failed")
 		return
 	}
 
@@ -116,7 +98,7 @@ func (p *LevelDBWal) Write(l *kt.Log) (err error) {
 }
 
 // Read implements Wal.Read.
-func (p *LevelDBWal) Read() (l *kt.Log, err error) {
+func (p *LevelDBWal) Read() (l kt.Log, err error) {
 	if atomic.LoadUint32(&p.closed) == 1 {
 		err = ErrWalClosed
 		return
@@ -132,13 +114,12 @@ func (p *LevelDBWal) Read() (l *kt.Log, err error) {
 
 	// start with base, use iterator to read
 	if p.it == nil {
-		keyRange := util.BytesPrefix(logHeaderKeyPrefix)
+		keyRange := util.BytesPrefix(logKeyPrefix)
 		p.it = p.db.NewIterator(keyRange, nil)
 	}
 
 	if p.it.Next() {
-		// load
-		l, err = p.load(p.it.Value())
+		err = utils.DecodeMsgPack(p.it.Value(), &l)
 		return
 	}
 
@@ -155,23 +136,30 @@ func (p *LevelDBWal) Read() (l *kt.Log, err error) {
 }
 
 // Get implements Wal.Get.
-func (p *LevelDBWal) Get(i uint64) (l *kt.Log, err error) {
+func (p *LevelDBWal) Get(i uint64) (l kt.Log, err error) {
 	if atomic.LoadUint32(&p.closed) == 1 {
 		err = ErrWalClosed
 		return
 	}
 
-	headerKey := append(append([]byte(nil), logHeaderKeyPrefix...), p.uint64ToBytes(i)...)
+	var (
+		logKey   = utils.ConcatAll(logKeyPrefix, p.uint64ToBytes(i))
+		logBytes []byte
+	)
 
-	var headerData []byte
-	if headerData, err = p.db.Get(headerKey, nil); err == leveldb.ErrNotFound {
+	if logBytes, err = p.db.Get(logKey, nil); err == leveldb.ErrNotFound {
 		err = ErrNotExists
 	} else if err != nil {
-		err = errors.Wrap(err, "get log header failed")
+		err = errors.Wrap(err, "get log failed")
 		return
 	}
 
-	return p.load(headerData)
+	if err = utils.DecodeMsgPack(logBytes, &l); err != nil {
+		err = errors.Wrap(err, "decode log failed")
+		return
+	}
+
+	return
 }
 
 // Close implements Wal.Close.
@@ -186,32 +174,8 @@ func (p *LevelDBWal) Close() {
 	}
 
 	if p.db != nil {
-		p.db.Close()
+		_ = p.db.Close()
 	}
-}
-
-func (p *LevelDBWal) load(logHeader []byte) (l *kt.Log, err error) {
-	l = new(kt.Log)
-
-	if err = utils.DecodeMsgPack(logHeader, &l.LogHeader); err != nil {
-		err = errors.Wrap(err, "decode log header failed")
-		return
-	}
-
-	dataKey := append(append([]byte(nil), logDataKeyPrefix...), p.uint64ToBytes(l.Index)...)
-
-	var encData []byte
-	if encData, err = p.db.Get(dataKey, nil); err != nil {
-		err = errors.Wrap(err, "get log data failed")
-		return
-	}
-
-	// load data
-	if err = utils.DecodeMsgPack(encData, &l.Data); err != nil {
-		err = errors.Wrap(err, "decode log data failed")
-	}
-
-	return
 }
 
 func (p *LevelDBWal) uint64ToBytes(o uint64) (res []byte) {

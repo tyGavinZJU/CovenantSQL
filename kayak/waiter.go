@@ -39,7 +39,7 @@ func newWaitItem(index uint64) *waitItem {
 	}
 }
 
-func (r *Runtime) waitForLog(ctx context.Context, index uint64) (l *kt.Log, err error) {
+func (r *Runtime) waitForLog(ctx context.Context, index uint64) (l kt.Log, err error) {
 	defer trace.StartRegion(ctx, "waitForLog").End()
 
 	for {

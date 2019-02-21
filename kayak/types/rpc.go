@@ -22,7 +22,7 @@ import "github.com/CovenantSQL/CovenantSQL/proto"
 type ApplyRequest struct {
 	proto.Envelope
 	Instance string
-	Log      *Log
+	Log      Log
 }
 
 // FetchRequest defines the fetch request entity.
@@ -36,5 +36,5 @@ type FetchRequest struct {
 type FetchResponse struct {
 	proto.Envelope
 	Instance string
-	Log      *Log
+	Log      Log
 }
