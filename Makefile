@@ -87,8 +87,6 @@ push_staging:
 	docker push $(IMAGE):staging
 
 push_chaos:
-	docker tag $(OB_IMAGE):$(VERSION) $(OB_IMAGE):chaos
-	docker push $(OB_IMAGE):chaos
 	docker tag $(IMAGE):$(VERSION) $(IMAGE):chaos
 	docker push $(IMAGE):chaos
 
