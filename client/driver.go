@@ -335,7 +335,7 @@ func GetAccountsTokenBalances(
 		resp = &types.QueryAccountsTokenBalancesResp{}
 	)
 
-	if err = requestBP(route.MCCQueryAccountTokenBalance, req, resp); err != nil {
+	if err = requestBP(route.MCCQueryAccountsTokenBalances, req, resp); err != nil {
 		return
 	}
 
