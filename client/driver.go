@@ -331,7 +331,7 @@ func GetAccountsTokenBalances(
 	}
 
 	var (
-		req  = &types.QueryAccountsTokenBalancesReq{}
+		req  = &types.QueryAccountsTokenBalancesReq{Addrs: accounts}
 		resp = &types.QueryAccountsTokenBalancesResp{}
 	)
 
