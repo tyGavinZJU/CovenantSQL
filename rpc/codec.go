@@ -21,6 +21,7 @@ import (
 	"net/rpc"
 
 	"github.com/CovenantSQL/CovenantSQL/proto"
+	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 )
 
 // NodeAwareServerCodec wraps normal rpc.ServerCodec and inject node id during request process.
@@ -41,6 +42,7 @@ func NewNodeAwareServerCodec(ctx context.Context, codec rpc.ServerCodec, nodeID 
 
 // ReadRequestBody override default rpc.ServerCodec behaviour and inject remote node id into request.
 func (nc *NodeAwareServerCodec) ReadRequestBody(body interface{}) (err error) {
+	defer trace.StartRegion(nc.Ctx, "codec-read-req-body").End()
 	err = nc.ServerCodec.ReadRequestBody(body)
 	if err != nil {
 		return
@@ -59,4 +61,14 @@ func (nc *NodeAwareServerCodec) ReadRequestBody(body interface{}) (err error) {
 	}
 
 	return
+}
+
+func (nc *NodeAwareServerCodec) ReadRequestHeader(req *rpc.Request) error {
+	defer trace.StartRegion(nc.Ctx, "codec-read-header").End()
+	return nc.ServerCodec.ReadRequestHeader(req)
+}
+
+func (nc *NodeAwareServerCodec) WriteResponse(resp *rpc.Response, body interface{}) error {
+	defer trace.StartRegion(nc.Ctx, "codec-write-response").End()
+	return nc.ServerCodec.WriteResponse(resp, body)
 }

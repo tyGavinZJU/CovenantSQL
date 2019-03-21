@@ -18,6 +18,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -38,6 +39,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/storage"
 	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
+	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 	x "github.com/CovenantSQL/CovenantSQL/xenomint"
 )
 
@@ -230,11 +232,16 @@ func (db *Database) UpdatePeers(peers *proto.Peers) (err error) {
 
 // Query defines database query interface.
 func (db *Database) Query(request *types.Request) (response *types.Response, err error) {
+	return db.QueryContext(context.Background(), request)
+}
+
+func (db *Database) QueryContext(ctx context.Context, request *types.Request) (response *types.Response, err error) {
 	// Just need to verify signature in db.saveAck
 	//if err = request.Verify(); err != nil {
 	//	return
 	//}
 
+	defer trace.StartRegion(ctx, fmt.Sprintf("db-query-%s", request.Header.QueryType)).End()
 	var (
 		isSlowQuery uint32
 		tracker     *x.QueryTracker
@@ -262,19 +269,23 @@ func (db *Database) Query(request *types.Request) (response *types.Response, err
 			return
 		}
 	case types.WriteQuery:
+		queryRegion := trace.StartRegion(ctx, "db-write")
 		if db.cfg.UseEventualConsistency {
 			// reset context
 			request.SetContext(context.Background())
 			if tracker, response, err = db.chain.Query(request, true); err != nil {
 				err = errors.Wrap(err, "failed to execute with eventual consistency")
+				queryRegion.End()
 				return
 			}
 		} else {
 			if tracker, response, err = db.writeQuery(request); err != nil {
 				err = errors.Wrap(err, "failed to execute")
+				queryRegion.End()
 				return
 			}
 		}
+		queryRegion.End()
 	default:
 		// TODO(xq262144): verbose errors with custom error structure
 		return nil, errors.Wrap(ErrInvalidRequest, "invalid query type")
@@ -283,17 +294,22 @@ func (db *Database) Query(request *types.Request) (response *types.Response, err
 	response.Header.ResponseAccount = db.accountAddr
 
 	// build hash
+	hashRegion := trace.StartRegion(ctx, "db-hash")
 	if err = response.BuildHash(); err != nil {
 		err = errors.Wrap(err, "failed to build response hash")
+		hashRegion.End()
 		return
 	}
+	hashRegion.End()
 
+	addRespRegion := trace.StartRegion(ctx, "db-add-response")
 	if err = db.chain.AddResponse(&response.Header); err != nil {
 		log.WithError(err).Debug("failed to add response to index")
+		addRespRegion.End()
 		return
 	}
 	tracker.UpdateResp(response)
-
+	addRespRegion.End()
 	return
 }
 

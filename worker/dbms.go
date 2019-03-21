@@ -19,6 +19,7 @@ package worker
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
+	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 )
 
 const (
@@ -482,24 +484,37 @@ func (dbms *DBMS) Update(instance *types.ServiceInstance) (err error) {
 
 // Query handles query request in dbms.
 func (dbms *DBMS) Query(req *types.Request) (res *types.Response, err error) {
+	res, err = dbms.QueryContext(context.Background(), req)
+	return
+}
+
+func (dbms *DBMS) QueryContext(ctx context.Context, req *types.Request) (res *types.Response, err error) {
+	defer trace.StartRegion(ctx, fmt.Sprintf("dbms-query-%s", req.Header.QueryType)).End()
 	var db *Database
 	var exists bool
 
 	// check permission
+	cpRegion := trace.StartRegion(ctx, fmt.Sprintf("dbms-checkPermission-%s", req.Header.QueryType))
 	addr, err := crypto.PubKeyHash(req.Header.Signee)
 	if err != nil {
+		cpRegion.End()
 		return
 	}
 	err = dbms.checkPermission(addr, req.Header.DatabaseID, req.Header.QueryType, req.Payload.Queries)
 	if err != nil {
+		cpRegion.End()
 		return
 	}
+	cpRegion.End()
 
 	// find database
+	getaRegion := trace.StartRegion(ctx, fmt.Sprintf("dbms-getMeta-%s", req.Header.QueryType))
 	if db, exists = dbms.getMeta(req.Header.DatabaseID); !exists {
 		err = ErrNotExists
+		getaRegion.End()
 		return
 	}
+	getaRegion.End()
 
 	return db.Query(req)
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -157,12 +158,12 @@ ackWorkerLoop:
 			continue
 		}
 
-		var ackRes types.AckResponse
-		// send ack back
-		if err = pc.Call(route.DBSAck.String(), ack, &ackRes); err != nil {
-			log.WithError(err).Debug("send ack failed")
-			continue
-		}
+		//var ackRes types.AckResponse
+		//// send ack back
+		//if err = pc.Call(route.DBSAck.String(), ack, &ackRes); err != nil {
+		//	log.WithError(err).Debug("send ack failed")
+		//	continue
+		//}
 	}
 
 	if pc != nil {
@@ -326,6 +327,7 @@ func (c *conn) Rollback() error {
 }
 
 func (c *conn) addQuery(ctx context.Context, queryType types.QueryType, query *types.Query) (affectedRows int64, lastInsertID int64, rows driver.Rows, err error) {
+	defer trace.StartRegion(ctx, fmt.Sprintf("addQuery-%s", queryType)).End()
 	if c.inTransaction {
 		// check query type, enqueue query
 		if queryType == types.ReadQuery {
@@ -354,6 +356,7 @@ func (c *conn) addQuery(ctx context.Context, queryType types.QueryType, query *t
 }
 
 func (c *conn) sendQuery(ctx context.Context, queryType types.QueryType, queries []types.Query) (affectedRows int64, lastInsertID int64, rows driver.Rows, err error) {
+	defer trace.StartRegion(ctx, fmt.Sprintf("sendQuery-%s", queryType)).End()
 	var uc *pconn // peer connection used to execute the queries
 
 	uc = c.leader
@@ -397,15 +400,21 @@ func (c *conn) sendQuery(ctx context.Context, queryType types.QueryType, queries
 		},
 	}
 
+	signRegion := trace.StartRegion(ctx, "sign")
 	if err = req.Sign(c.privKey); err != nil {
+		signRegion.End()
 		return
 	}
+	signRegion.End()
 
+	queryRegion := trace.StartRegion(ctx, "query")
 	var response types.Response
-	if err = uc.pCaller.Call(route.DBSQuery.String(), req, &response); err != nil {
+	if err = uc.pCaller.CallContext(ctx, route.DBSQuery.String(), req, &response); err != nil {
+		queryRegion.End()
 		return
 	}
 	rows = newRows(&response)
+	queryRegion.End()
 
 	if queryType == types.WriteQuery {
 		affectedRows = response.Header.AffectedRows
@@ -413,6 +422,7 @@ func (c *conn) sendQuery(ctx context.Context, queryType types.QueryType, queries
 	}
 
 	// build ack
+	defer trace.StartRegion(ctx, "ack").End()
 	func() {
 		defer trace.StartRegion(ctx, "ackEnqueue").End()
 		uc.ackCh <- &types.Ack{

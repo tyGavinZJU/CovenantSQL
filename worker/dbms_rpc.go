@@ -17,6 +17,8 @@
 package worker
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	metrics "github.com/rcrowley/go-metrics"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/route"
 	"github.com/CovenantSQL/CovenantSQL/rpc"
 	"github.com/CovenantSQL/CovenantSQL/types"
+	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 )
 
 var (
@@ -72,6 +75,9 @@ func (rpc *DBMSRPCService) Query(req *types.Request, res *types.Response) (err e
 	//	return
 	//}
 	// verify query is sent from the request node
+	ctx, task := trace.NewTask(context.Background(), "rpc-query")
+	defer task.End()
+	defer trace.StartRegion(ctx, "rpc-query").End()
 	if req.Envelope.NodeID.String() != string(req.Header.NodeID) {
 		// node id mismatch
 		err = errors.Wrap(ErrInvalidRequest, "request node id mismatch in query")

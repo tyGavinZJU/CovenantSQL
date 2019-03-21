@@ -228,7 +228,7 @@ func setup() {
 		panic(err)
 	}
 
-	log.SetLevel(log.DebugLevel)
+	log.SetLevel(log.InfoLevel)
 	log.SetOutput(os.Stdout)
 }
 

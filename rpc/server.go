@@ -32,6 +32,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/proto"
 	"github.com/CovenantSQL/CovenantSQL/utils"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
+	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 )
 
 // ServiceMap maps service name to service instance.
@@ -159,13 +160,17 @@ sessionLoop:
 				}
 				break sessionLoop
 			}
-			ctx, cancelFunc := context.WithCancel(context.Background())
+			tctx, task := trace.NewTask(context.Background(), "mux-session")
+			ctx, cancelFunc := context.WithCancel(tctx)
 			go func() {
 				<-muxConn.GetDieCh()
 				cancelFunc()
 			}()
 			nodeAwareCodec := NewNodeAwareServerCodec(ctx, utils.GetMsgPackServerCodec(muxConn), remoteNodeID)
-			go s.rpcServer.ServeCodec(nodeAwareCodec)
+			go func() {
+				defer task.End()
+				s.rpcServer.ServeCodec(nodeAwareCodec)
+			}()
 		}
 	}
 }

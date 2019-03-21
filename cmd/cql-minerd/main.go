@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -122,6 +123,7 @@ func main() {
 	flag.Parse()
 	// set random
 	rand.Seed(time.Now().UnixNano())
+
 	log.SetStringLevel(logLevel, log.InfoLevel)
 
 	if showVersion {
@@ -254,6 +256,9 @@ func main() {
 				log.WithError(err).Fatal("failed to close trace file")
 			}
 		}()
+
+		_, task := trace.NewTask(context.Background(), "cql-minerd")
+		defer task.End()
 
 		if err := trace.Start(f); err != nil {
 			log.WithError(err).Fatal("failed to start trace")

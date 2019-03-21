@@ -35,6 +35,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/proto"
 	"github.com/CovenantSQL/CovenantSQL/route"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
+	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 )
 
 var (
@@ -88,18 +89,29 @@ func (c *PersistentCaller) initClient(isAnonymous bool) (err error) {
 	return
 }
 
-// Call invokes the named function, waits for it to complete, and returns its error status.
 func (c *PersistentCaller) Call(method string, args interface{}, reply interface{}) (err error) {
+	return c.CallContext(context.Background(), method, args, reply)
+}
+
+// Call invokes the named function, waits for it to complete, and returns its error status.
+func (c *PersistentCaller) CallContext(ctx context.Context, method string, args interface{}, reply interface{}) (err error) {
+	sctx, task := trace.NewTask(ctx, "call-rpc")
+	defer task.End()
 	startTime := time.Now()
 	defer func() {
 		recordRPCCost(startTime, method, err)
 	}()
 
+	initRegion := trace.StartRegion(sctx, "init")
 	err = c.initClient(method == route.DHTPing.String())
 	if err != nil {
 		err = errors.Wrap(err, "init PersistentCaller client failed")
+		initRegion.End()
 		return
 	}
+	initRegion.End()
+
+	callRegion := trace.StartRegion(sctx, "call")
 	err = c.client.Call(method, args, reply)
 	if err != nil {
 		if err == io.EOF ||
@@ -115,8 +127,10 @@ func (c *PersistentCaller) Call(method string, args interface{}, reply interface
 			}
 		}
 		err = errors.Wrapf(err, "call %s failed", method)
+		callRegion.End()
 		return
 	}
+	callRegion.End()
 	return
 }
 

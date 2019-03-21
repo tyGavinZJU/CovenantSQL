@@ -141,10 +141,11 @@ func newSessionPool(nd NodeDialer) *SessionPool {
 
 // GetSessionPoolInstance return default SessionPool instance with rpc.DefaultDialer.
 func GetSessionPoolInstance() *SessionPool {
-	once.Do(func() {
-		instance = newSessionPool(DefaultDialer)
-	})
-	return instance
+	//once.Do(func() {
+	//	instance = newSessionPool(DefaultDialer)
+	//})
+	//return instance
+	return newSessionPool(DefaultDialer)
 }
 
 func (p *SessionPool) getSession(id proto.NodeID) (sess *Session, loaded bool) {

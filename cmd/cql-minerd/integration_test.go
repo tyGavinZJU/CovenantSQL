@@ -173,6 +173,7 @@ func startNodes() {
 		[]string{"-config", FJ(testWorkingDir, "./integration/node_miner_0/config.yaml"),
 			"-test.coverprofile", FJ(baseDir, "./cmd/cql-minerd/miner0.cover.out"),
 			"-metric-web", "0.0.0.0:12144",
+			"-log-level", "debug",
 		},
 		"miner0", testWorkingDir, logDir, true,
 	); err == nil {
@@ -187,6 +188,7 @@ func startNodes() {
 		[]string{"-config", FJ(testWorkingDir, "./integration/node_miner_1/config.yaml"),
 			"-test.coverprofile", FJ(baseDir, "./cmd/cql-minerd/miner1.cover.out"),
 			"-metric-web", "0.0.0.0:12145",
+			"-log-level", "debug",
 		},
 		"miner1", testWorkingDir, logDir, false,
 	); err == nil {
@@ -201,6 +203,7 @@ func startNodes() {
 		[]string{"-config", FJ(testWorkingDir, "./integration/node_miner_2/config.yaml"),
 			"-test.coverprofile", FJ(baseDir, "./cmd/cql-minerd/miner2.cover.out"),
 			"-metric-web", "0.0.0.0:12146",
+			"-log-level", "debug",
 		},
 		"miner2", testWorkingDir, logDir, false,
 	); err == nil {
@@ -283,7 +286,7 @@ func startNodesProfile(bypassSign bool) {
 		FJ(baseDir, "./bin/cql-minerd"),
 		[]string{"-config", FJ(testWorkingDir, "./integration/node_miner_0/config.yaml"),
 			"-cpu-profile", FJ(baseDir, "./cmd/cql-minerd/miner0.profile"),
-			//"-trace-file", FJ(baseDir, "./cmd/cql-minerd/miner0.trace"),
+			"-trace-file", FJ(baseDir, "./cmd/cql-minerd/miner0.trace"),
 			"-metric-graphite-server", "192.168.2.100:2003",
 			"-profile-server", "0.0.0.0:8080",
 			"-metric-log",
@@ -301,7 +304,7 @@ func startNodesProfile(bypassSign bool) {
 		FJ(baseDir, "./bin/cql-minerd"),
 		[]string{"-config", FJ(testWorkingDir, "./integration/node_miner_1/config.yaml"),
 			"-cpu-profile", FJ(baseDir, "./cmd/cql-minerd/miner1.profile"),
-			//"-trace-file", FJ(baseDir, "./cmd/cql-minerd/miner1.trace"),
+			"-trace-file", FJ(baseDir, "./cmd/cql-minerd/miner1.trace"),
 			"-metric-graphite-server", "192.168.2.100:2003",
 			"-profile-server", "0.0.0.0:8081",
 			"-metric-log",
@@ -319,7 +322,7 @@ func startNodesProfile(bypassSign bool) {
 		FJ(baseDir, "./bin/cql-minerd"),
 		[]string{"-config", FJ(testWorkingDir, "./integration/node_miner_2/config.yaml"),
 			"-cpu-profile", FJ(baseDir, "./cmd/cql-minerd/miner2.profile"),
-			//"-trace-file", FJ(baseDir, "./cmd/cql-minerd/miner2.trace"),
+			"-trace-file", FJ(baseDir, "./cmd/cql-minerd/miner2.trace"),
 			"-metric-graphite-server", "192.168.2.100:2003",
 			"-profile-server", "0.0.0.0:8082",
 			"-metric-log",
@@ -672,6 +675,7 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 
 	var i int64
 	i = -1
+	db.SetMaxIdleConns(64)
 
 	b.Run(makeBenchName("INSERT"), func(b *testing.B) {
 		b.ResetTimer()
@@ -709,6 +713,18 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 	} else {
 		log.Infof("go routine count: %d", routineCount)
 	}
+
+	stat := db.Stats()
+	log.WithFields(log.Fields{
+		"idle":                stat.Idle,
+		"inuse":               stat.InUse,
+		"opened":              stat.OpenConnections,
+		"max_open":            stat.MaxOpenConnections,
+		"max_lifetime_closed": stat.MaxLifetimeClosed,
+		"max_idle_closed":     stat.MaxIdleClosed,
+		"wait_count":          stat.WaitCount,
+		"wait_duration":       stat.WaitDuration,
+	}).Infof("database stat")
 
 	rowCount := db.QueryRow("SELECT COUNT(1) FROM " + TABLENAME)
 	var count int64
@@ -751,6 +767,18 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 	} else {
 		log.Infof("go routine count: %d", routineCount)
 	}
+
+	stat = db.Stats()
+	log.WithFields(log.Fields{
+		"idle":                stat.Idle,
+		"inuse":               stat.InUse,
+		"opened":              stat.OpenConnections,
+		"max_open":            stat.MaxOpenConnections,
+		"max_lifetime_closed": stat.MaxLifetimeClosed,
+		"max_idle_closed":     stat.MaxIdleClosed,
+		"wait_count":          stat.WaitCount,
+		"wait_duration":       stat.WaitDuration,
+	}).Infof("database stat")
 
 	//row := db.QueryRow("SELECT nonIndexedColumn FROM test LIMIT 1")
 
@@ -801,8 +829,9 @@ func benchMiner(b *testing.B, minerCount uint16) {
 		// create
 		meta := client.ResourceMeta{
 			ResourceMeta: types.ResourceMeta{
-				Node: minerCount,
+				Node:                   minerCount,
 				UseEventualConsistency: benchEventualConsistency,
+				IsolationLevel:         int(sql.LevelReadUncommitted),
 			},
 		}
 		// wait for chain service
@@ -911,8 +940,9 @@ func benchOutsideMinerWithTargetMinerList(
 		// create
 		meta := client.ResourceMeta{
 			ResourceMeta: types.ResourceMeta{
-				TargetMiners: targetMiners,
-				Node:         minerCount,
+				TargetMiners:   targetMiners,
+				Node:           minerCount,
+				IsolationLevel: int(sql.LevelReadUncommitted),
 			},
 			AdvancePayment: 1000000000,
 		}
@@ -978,4 +1008,27 @@ func BenchmarkCustomMiner(b *testing.B) {
 	Convey(fmt.Sprintf("bench custom %d node(s)", benchMinerCount), b, func() {
 		benchOutsideMiner(b, uint16(benchMinerCount), benchMinerConfigDir)
 	})
+}
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	os.Exit(func() int {
+		if traceFile != "" {
+			f, err := os.Create(traceFile)
+			if err != nil {
+				log.WithError(err).Fatal("failed to create trace output file")
+			}
+			defer func() {
+				if err := f.Close(); err != nil {
+					log.WithError(err).Fatal("failed to close trace file")
+				}
+			}()
+
+			if err := trace.Start(f); err != nil {
+				log.WithError(err).Fatal("failed to start trace")
+			}
+			defer trace.Stop()
+		}
+		return m.Run()
+	}())
 }

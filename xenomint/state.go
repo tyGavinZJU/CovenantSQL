@@ -53,16 +53,16 @@ type sqlHandler interface {
 
 // State defines a xenomint state which is bound to a underlying storage.
 type State struct {
-	level sql.IsolationLevel
+	level  sql.IsolationLevel
+	maxTx  uint64
+	nodeID proto.NodeID
 
 	sync.RWMutex
 	strg   xi.Storage
 	pool   *pool
 	closed bool
-	nodeID proto.NodeID
 
 	handler         sqlHandler
-	maxTx           uint64
 	lastCommitPoint uint64
 	current         uint64 // current is the current lastSeq of the current transaction
 	hasSchemaChange uint32 // indicates schema change happens in this uncommitted transaction
