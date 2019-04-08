@@ -25,6 +25,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/proto"
 	"github.com/CovenantSQL/CovenantSQL/route"
 	"github.com/CovenantSQL/CovenantSQL/rpc"
+	"github.com/CovenantSQL/CovenantSQL/rpc/mux"
 	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils/trace"
 )
@@ -53,11 +54,18 @@ type DBMSRPCService struct {
 }
 
 // NewDBMSRPCService returns new dbms rpc service endpoint.
-func NewDBMSRPCService(serviceName string, server *rpc.Server, dbms *DBMS) (service *DBMSRPCService) {
+func NewDBMSRPCService(
+	serviceName string, server *mux.Server, direct *rpc.Server, dbms *DBMS,
+) (
+	service *DBMSRPCService,
+) {
 	service = &DBMSRPCService{
 		dbms: dbms,
 	}
 	server.RegisterService(serviceName, service)
+	if direct != nil {
+		direct.RegisterService(serviceName, service)
+	}
 
 	dbQuerySuccCounter = metrics.NewMeter()
 	metrics.Register("db-query-succ", dbQuerySuccCounter)

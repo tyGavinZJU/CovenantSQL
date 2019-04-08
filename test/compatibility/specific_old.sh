@@ -49,9 +49,9 @@ nohup ${MINERBIN} -config node_miner_2/config.yaml >${LOGS_DIR}/miner2.log 2>&1 
 # wait miner start
 sleep 20
 
-${CLIENTBIN} -config node_c/config.yaml -get-balance
+${CLIENTBIN} wallet -config node_c/config.yaml -balance all -no-password
 
-${CLIENTBIN} -config node_c/config.yaml -create 2 -wait-tx-confirm | tee dsn.txt
+${CLIENTBIN} create -config node_c/config.yaml -wait-tx-confirm -no-password '{"node":2}' | tee dsn.txt
 
 #get dsn
 dsn=$(cat dsn.txt)
@@ -59,11 +59,11 @@ if [ -z "$dsn" ]; then
     exit 1
 fi
 
-${CLIENTBIN} -config ${PROJECT_DIR}/test/integration/node_c/config.yaml -dsn ${dsn} \
-    -command 'create table test_for_new_account(column1 int);'
+${CLIENTBIN} console -config ${PROJECT_DIR}/test/integration/node_c/config.yaml -dsn ${dsn} \
+    -command 'create table test_for_new_account(column1 int);' -no-password
 
-${CLIENTBIN} -config ${PROJECT_DIR}/test/integration/node_c/config.yaml -dsn ${dsn} \
-    -command 'show tables;' | tee result.log
+${CLIENTBIN} console -config ${PROJECT_DIR}/test/integration/node_c/config.yaml -dsn ${dsn} \
+    -command 'show tables;' -no-password | tee result.log
 
 grep "1 row" result.log
 

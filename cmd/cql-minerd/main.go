@@ -36,6 +36,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/crypto/kms"
 	"github.com/CovenantSQL/CovenantSQL/metric"
 	"github.com/CovenantSQL/CovenantSQL/rpc"
+	"github.com/CovenantSQL/CovenantSQL/rpc/mux"
 	"github.com/CovenantSQL/CovenantSQL/utils"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
 	_ "github.com/CovenantSQL/CovenantSQL/utils/log/debug"
@@ -171,8 +172,11 @@ func main() {
 	conf.GConf.GenerateKeyPair = genKeyPair
 
 	// start rpc
-	var server *rpc.Server
-	if server, err = initNode(); err != nil {
+	var (
+		server *mux.Server
+		direct *rpc.Server
+	)
+	if server, direct, err = initNode(); err != nil {
 		log.WithError(err).Fatal("init node failed")
 	}
 
@@ -215,7 +219,7 @@ func main() {
 
 	// start dbms
 	var dbms *worker.DBMS
-	if dbms, err = startDBMS(server, func() {
+	if dbms, err = startDBMS(server, direct, func() {
 		sendProvideService(reg)
 	}); err != nil {
 		log.WithError(err).Fatal("start dbms failed")
@@ -227,10 +231,15 @@ func main() {
 	go func() {
 		server.Serve()
 	}()
-	defer func() {
-		_ = server.Listener.Close()
-		server.Stop()
-	}()
+	defer server.Stop()
+
+	// start direct rpc server
+	if direct != nil {
+		go func() {
+			direct.Serve()
+		}()
+		defer direct.Stop()
+	}
 
 	if metricLog {
 		go metrics.Log(metrics.DefaultRegistry, 5*time.Second, log.StandardLogger())

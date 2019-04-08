@@ -810,13 +810,6 @@ func (s *metaState) updatePermission(tx *types.UpdatePermission) (err error) {
 		}).WithError(ErrDatabaseNotFound).Error("unexpected error in updatePermission")
 		return ErrDatabaseNotFound
 	}
-	if !tx.Permission.IsValid() {
-		log.WithFields(log.Fields{
-			"permission": tx.Permission,
-			"dbID":       tx.TargetSQLChain.DatabaseID(),
-		}).WithError(ErrInvalidPermission).Error("unexpected error in updatePermission")
-		return ErrInvalidPermission
-	}
 
 	// check whether sender has super privilege and find targetUser
 	numOfSuperUsers := 0
@@ -907,7 +900,8 @@ func (s *metaState) updateBilling(tx *types.UpdateBilling) (err error) {
 		err = errors.Wrap(ErrDatabaseNotFound, "update billing failed")
 		return
 	}
-	if tx.Range.From >= tx.Range.To || newProfile.LastUpdatedHeight != tx.Range.From {
+
+	if tx.Version > 0 && (tx.Range.From >= tx.Range.To || newProfile.LastUpdatedHeight != tx.Range.From) {
 		err = errors.Wrapf(ErrInvalidRange,
 			"update billing within range %d:(%d, %d]",
 			newProfile.LastUpdatedHeight, tx.Range.From, tx.Range.To)

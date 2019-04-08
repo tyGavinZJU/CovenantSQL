@@ -44,9 +44,10 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/crypto"
 	"github.com/CovenantSQL/CovenantSQL/crypto/asymmetric"
 	"github.com/CovenantSQL/CovenantSQL/crypto/kms"
+	"github.com/CovenantSQL/CovenantSQL/naconn"
 	"github.com/CovenantSQL/CovenantSQL/proto"
 	"github.com/CovenantSQL/CovenantSQL/route"
-	"github.com/CovenantSQL/CovenantSQL/rpc"
+	rpc "github.com/CovenantSQL/CovenantSQL/rpc/mux"
 	"github.com/CovenantSQL/CovenantSQL/test"
 	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils"
@@ -71,6 +72,7 @@ var (
 	benchMinerCount          int
 	benchBypassSignature     bool
 	benchEventualConsistency bool
+	benchMinerDirectRPC      bool
 	benchMinerConfigDir      string
 )
 
@@ -81,6 +83,8 @@ func init() {
 		"Benchmark bypassing signature.")
 	flag.BoolVar(&benchEventualConsistency, "bench-eventual-consistency", false,
 		"Benchmark with eventaul consistency.")
+	flag.BoolVar(&benchMinerDirectRPC, "bench-direct-rpc", false,
+		"Benchmark with with direct RPC protocol.")
 	flag.StringVar(&benchMinerConfigDir, "bench-miner-config-dir", "",
 		"Benchmark custome miner config directory.")
 }
@@ -599,6 +603,37 @@ func TestFullProcess(t *testing.T) {
 		err = db.Close()
 		So(err, ShouldBeNil)
 
+		// test query from follower node
+		dsnCfgMix := *dsnCfg
+		dsnCfgMix.UseLeader = true
+		dsnCfgMix.UseFollower = true
+		dbMix, err := sql.Open("covenantsql", dsnCfgMix.FormatDSN())
+		So(err, ShouldBeNil)
+		defer dbMix.Close()
+
+		result = 0
+		err = dbMix.QueryRow("SELECT * FROM test LIMIT 1").Scan(&result)
+		So(err, ShouldBeNil)
+		So(result, ShouldEqual, 4)
+
+		_, err = dbMix.Exec("INSERT INTO test VALUES(2)")
+		So(err, ShouldBeNil)
+
+		// test query from follower only
+		dsnCfgFollower := *dsnCfg
+		dsnCfgFollower.UseLeader = false
+		dsnCfgFollower.UseFollower = true
+		dbFollower, err := sql.Open("covenantsql", dsnCfgFollower.FormatDSN())
+		So(err, ShouldBeNil)
+		defer dbFollower.Close()
+
+		err = dbFollower.QueryRow("SELECT * FROM test LIMIT 1").Scan(&result)
+		So(err, ShouldBeNil)
+		So(result, ShouldEqual, 4)
+
+		_, err = dbFollower.Exec("INSERT INTO test VALUES(2)")
+		So(err, ShouldNotBeNil)
+
 		// TODO(lambda): Drop database
 	})
 }
@@ -675,7 +710,7 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 
 	var i int64
 	i = -1
-	db.SetMaxIdleConns(64)
+	db.SetMaxIdleConns(256)
 
 	b.Run(makeBenchName("INSERT"), func(b *testing.B) {
 		b.ResetTimer()
@@ -708,7 +743,7 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 	})
 
 	routineCount := runtime.NumGoroutine()
-	if routineCount > 100 {
+	if routineCount > 150 {
 		b.Errorf("go routine count: %d", routineCount)
 	} else {
 		log.Infof("go routine count: %d", routineCount)
@@ -762,7 +797,7 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 	})
 
 	routineCount = runtime.NumGoroutine()
-	if routineCount > 100 {
+	if routineCount > 150 {
 		b.Errorf("go routine count: %d", routineCount)
 	} else {
 		log.Infof("go routine count: %d", routineCount)
@@ -852,6 +887,13 @@ func benchMiner(b *testing.B, minerCount uint16) {
 		defer os.Remove(dsnFile)
 	} else {
 		dsn = os.Getenv("DSN")
+	}
+
+	if benchMinerDirectRPC {
+		dsnCfg, err := client.ParseDSN(dsn)
+		So(err, ShouldBeNil)
+		dsnCfg.UseDirectRPC = true
+		dsn = dsnCfg.FormatDSN()
 	}
 
 	db, err := sql.Open("covenantsql", dsn)
@@ -1012,6 +1054,9 @@ func BenchmarkCustomMiner(b *testing.B) {
 
 func TestMain(m *testing.M) {
 	flag.Parse()
+	if benchMinerDirectRPC {
+		naconn.RegisterResolver(rpc.NewDirectResolver())
+	}
 	os.Exit(func() int {
 		if traceFile != "" {
 			f, err := os.Create(traceFile)

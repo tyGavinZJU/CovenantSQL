@@ -1016,10 +1016,11 @@ func TestMetaState(t *testing.T) {
 				err = up.Sign(privKey1)
 				So(err, ShouldBeNil)
 				err = ms.apply(&up)
-				So(errors.Cause(err), ShouldEqual, ErrInvalidPermission)
+				So(err, ShouldBeNil)
 				// test permission update
 				// addr1(admin) update addr3 as admin
 				up.TargetUser = addr3
+				up.Nonce++
 				up.Permission = types.UserPermissionFromRole(types.Admin)
 				err = up.Sign(privKey1)
 				So(err, ShouldBeNil)
@@ -1052,7 +1053,7 @@ func TestMetaState(t *testing.T) {
 				err = ms.apply(&up)
 				So(errors.Cause(err), ShouldEqual, ErrNoSuperUserLeft)
 				// addr1(read) update addr3(admin) fail
-				up.Nonce = cd1.Nonce + 2
+				up.Nonce = cd1.Nonce + 3
 				err = up.Sign(privKey1)
 				So(err, ShouldBeNil)
 				err = ms.apply(&up)
@@ -1168,6 +1169,7 @@ func TestMetaState(t *testing.T) {
 							To:   10,
 						},
 					})
+					ub.Version = int32(ub.HSPDefaultVersion())
 					nonce, err = ms.nextNonce(addr2)
 					So(err, ShouldBeNil)
 					ub.Nonce = nonce
@@ -1296,7 +1298,7 @@ func TestMetaState(t *testing.T) {
 					invalidIk3 := &types.IssueKeys{
 						IssueKeysHeader: types.IssueKeysHeader{
 							TargetSQLChain: dbAccount,
-							Nonce:          3,
+							Nonce:          4,
 						},
 					}
 					err = invalidIk3.Sign(privKey1)
@@ -1351,6 +1353,7 @@ func TestMetaState(t *testing.T) {
 							},
 						},
 					}
+					ub1.Version = int32(ub1.HSPDefaultVersion())
 					err = ub1.Sign(privKey1)
 					So(err, ShouldBeNil)
 					err = ms.apply(ub1)
@@ -1441,6 +1444,7 @@ func TestMetaState(t *testing.T) {
 							},
 						},
 					}
+					ub2.Version = int32(ub2.HSPDefaultVersion())
 					err = ub2.Sign(privKey2)
 					So(err, ShouldBeNil)
 					err = ms.apply(ub2)
@@ -1492,6 +1496,7 @@ func TestMetaState(t *testing.T) {
 							},
 						},
 					}
+					ub3.Version = int32(ub3.HSPDefaultVersion())
 					err = ub3.Sign(privKey2)
 					So(err, ShouldBeNil)
 					err = ms.apply(ub3)

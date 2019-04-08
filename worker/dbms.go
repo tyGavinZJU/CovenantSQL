@@ -111,7 +111,7 @@ func NewDBMS(cfg *DBMSConfig) (dbms *DBMS, err error) {
 	}
 
 	// init service
-	dbms.rpc = NewDBMSRPCService(route.DBRPCName, cfg.Server, dbms)
+	dbms.rpc = NewDBMSRPCService(route.DBRPCName, cfg.Server, cfg.DirectServer, dbms)
 	return
 }
 
@@ -332,10 +332,12 @@ func (dbms *DBMS) UpdatePermission(dbID proto.DatabaseID, user proto.AccountAddr
 	} else {
 		exist := false
 		for _, u := range profile.Users {
-			u.Address = user
-			u.Permission = permStat.Permission
-			u.Status = permStat.Status
-			exist = true
+			if u.Address == user {
+				u.Permission = permStat.Permission
+				u.Status = permStat.Status
+				exist = true
+				break
+			}
 		}
 		if !exist {
 			profile.Users = append(profile.Users, &types.SQLChainUser{
@@ -423,6 +425,7 @@ func (dbms *DBMS) Create(instance *types.ServiceInstance, cleanup bool) (err err
 	// new db
 	dbCfg := &DBConfig{
 		DatabaseID:             instance.DatabaseID,
+		RootDir:                dbms.cfg.RootDir,
 		DataDir:                rootDir,
 		KayakMux:               dbms.kayakMux,
 		ChainMux:               dbms.chainMux,

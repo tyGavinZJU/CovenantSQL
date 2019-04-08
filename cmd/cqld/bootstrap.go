@@ -30,7 +30,7 @@ import (
 	"github.com/CovenantSQL/CovenantSQL/crypto/kms"
 	"github.com/CovenantSQL/CovenantSQL/proto"
 	"github.com/CovenantSQL/CovenantSQL/route"
-	"github.com/CovenantSQL/CovenantSQL/rpc"
+	rpc "github.com/CovenantSQL/CovenantSQL/rpc/mux"
 	"github.com/CovenantSQL/CovenantSQL/types"
 	"github.com/CovenantSQL/CovenantSQL/utils"
 	"github.com/CovenantSQL/CovenantSQL/utils/log"
@@ -47,7 +47,7 @@ func runNode(nodeID proto.NodeID, listenAddr string) (err error) {
 	}
 
 	var masterKey []byte
-	if !conf.GConf.IsTestMode {
+	if !conf.GConf.UseTestMasterKey {
 		// read master key
 		fmt.Print("Type in Master key to continue: ")
 		masterKey, err = terminal.ReadPassword(syscall.Stdin)
