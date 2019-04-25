@@ -18,6 +18,7 @@ package blockproducer
 
 import (
 	"database/sql"
+
 	pi "github.com/CovenantSQL/CovenantSQL/blockproducer/interfaces"
 	"github.com/CovenantSQL/CovenantSQL/crypto/hash"
 	"github.com/CovenantSQL/CovenantSQL/proto"
@@ -185,6 +186,8 @@ func (c *Chain) queryAccountSQLChainProfiles(account proto.AccountAddress) (prof
 			if err != nil {
 				return
 			}
+
+			dbs = append(dbs, proto.DatabaseID(id))
 		}
 
 		return
