@@ -33,7 +33,7 @@ fast() {
 
 full() {
     echo "Full benchmarking with flags: $@"
-    local cpus=("" 4 1) counts=(1 2 4 8)
+    local cpus=("") counts=(1 2 8)
     local cpu count caseflags
     for count in "${counts[@]}"; do
         for cpu in "${cpus[@]}"; do
