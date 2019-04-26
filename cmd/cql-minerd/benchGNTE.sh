@@ -38,7 +38,7 @@ full() {
     for count in "${counts[@]}"; do
         for cpu in "${cpus[@]}"; do
             if [[ -z $cpu ]]; then
-                caseflags=("${flags[@]}")
+                caseflags=("-cpu=256" "${flags[@]}")
             else
                 caseflags=("-cpu=$cpu" "${flags[@]}")
             fi
