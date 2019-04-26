@@ -13,7 +13,7 @@ clean() {
         # Clean
         sudo ${TEST_WD}/GNTE/scripts/cleanupDB.sh
         if [[ ${delay_file} =~ "eventual" ]]; then
-            bash -x ${TEST_WD}/GNTE/generate.sh ./scripts/gnte_200ms.yaml
+            bash -x ${TEST_WD}/GNTE/generate.sh ./scripts/gnte_0ms.yaml
         else
             bash -x ${TEST_WD}/GNTE/generate.sh ${delay_file}
         fi
