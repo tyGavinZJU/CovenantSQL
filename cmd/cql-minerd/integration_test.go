@@ -746,11 +746,7 @@ func benchDB(b *testing.B, db *sql.DB, createDB bool) {
 	})
 
 	routineCount := runtime.NumGoroutine()
-	if routineCount > 150 {
-		b.Errorf("go routine count: %d", routineCount)
-	} else {
-		log.Infof("go routine count: %d", routineCount)
-	}
+	log.Infof("go routine count: %d", routineCount)
 
 	rowCount := db.QueryRow("SELECT COUNT(1) FROM " + TABLENAME)
 	var count int64
